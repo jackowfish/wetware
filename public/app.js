@@ -307,6 +307,63 @@ function typingRow(key, name) {
   return { el: row, isBubble: false, key };
 }
 
+const CHECK_SVG = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+// an iMessage-style poll: title + option rows with a tappable check circle;
+// in reveal mode each row grows a results bar, a tally, and voter avatars.
+function pollRow(key, { title, sub, options, mode, live }) {
+  const row = el("div", "row in poll-row");
+  row.dataset.key = key;
+  row.appendChild(el("span", "row-avatar av-machine", "W"));
+  const stack = el("div", "stack");
+
+  const poll = el("div", "poll" + (live ? " live" : ""));
+  const head = el("div", "poll-head");
+  head.innerHTML =
+    `<span class="poll-glyph" aria-hidden="true">
+       <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+         <path d="M5 13V9M10 13V5M15 13v-2"/></svg>
+     </span>
+     <div class="poll-headtext"><div class="poll-title">${escapeHtml(title)}</div><div class="poll-sub">${sub}</div></div>`;
+  poll.appendChild(head);
+
+  for (const o of options) {
+    const clickable = mode === "voting" && typeof o.onVote === "function";
+    const opt = el(clickable ? "button" : "div", "poll-opt"
+      + (o.picked ? " picked" : "") + (o.correct ? " correct" : "") + (clickable ? " tappable" : ""));
+    if (clickable) opt.addEventListener("click", o.onVote);
+
+    if (mode === "reveal") {
+      const fill = el("span", "poll-fill");
+      fill.style.width = (o.share || 0) + "%";
+      opt.appendChild(fill);
+    }
+    opt.appendChild(el("span", "poll-check", CHECK_SVG));
+
+    const body = el("div", "poll-body");
+    body.appendChild(el("div", "poll-otext",
+      `<span class="poll-letter">${escapeHtml(o.id)}</span>${escapeHtml(o.text)}`));
+    if (mode === "reveal" && (o.isHuman || (o.voters || []).length)) {
+      const meta = el("div", "poll-voters");
+      if (o.isHuman) meta.appendChild(el("span", "poll-flag", "🎭 the human"));
+      for (const nm of (o.voters || []).slice(0, 5)) {
+        const a = avatarInfo(nm);
+        meta.appendChild(el("span", `poll-av av-${a.idx}`, escapeHtml(a.initials)));
+      }
+      if ((o.voters || []).length > 5) meta.appendChild(el("span", "poll-more", `+${o.voters.length - 5}`));
+      body.appendChild(meta);
+    }
+    opt.appendChild(body);
+
+    if (mode === "reveal") opt.appendChild(el("span", "poll-count", String(o.count || 0)));
+    poll.appendChild(opt);
+  }
+
+  stack.appendChild(poll);
+  row.appendChild(stack);
+  return { el: row, isBubble: false, key };
+}
+
 // ── render ─────────────────────────────────────────────────────────────────
 
 function render() {
@@ -441,39 +498,24 @@ function buildThread(s) {
     const canVote = !amAnswerer && !spectator;
     const voted = priv?.myVote !== undefined;
 
-    if (amAnswerer) {
-      msgs.push(bubbleRow({ key: "vote-mine", side: "in", name: MACHINE,
-        html: `This is your prompt — your fake reply is hiding in the line-up below. Sit tight and hope they miss it.` }));
-    } else if (spectator) {
-      msgs.push(bubbleRow({ key: "vote-spec", side: "in", name: MACHINE,
-        html: `You're watching this game — no vote this round.` }));
-    } else {
-      msgs.push(bubbleRow({ key: "vote-instr-" + s.itemIndex, side: "in", name: MACHINE,
-        html: `One of these replies was written by a human pretending to be me. <b>Tap the impostor.</b>` }));
-    }
+    let sub;
+    if (amAnswerer) sub = "Your fake reply is in here — sit tight 🤫";
+    else if (spectator) sub = `Watching · ${s.votesIn}/${s.votersTotal} voted`;
+    else sub = voted
+      ? `Vote locked · ${s.votesIn}/${s.votersTotal} voted`
+      : `Tap the reply a human wrote · ${s.votesIn}/${s.votersTotal} voted`;
 
-    for (const slot of s.slots || []) {
-      const mine = priv?.myVote === slot.id;
-      msgs.push(bubbleRow({
-        key: "vote-slot-" + s.itemIndex + "-" + slot.id,
-        side: "in", name: MACHINE,
-        html: `<span class="tag">${escapeHtml(slot.id)}</span>${escapeHtml(slot.text)}`,
-        picked: mine,
-        tapbackHtml: mine ? "✋" : null,
-        votable: canVote && !voted,
-        onVote: canVote && !voted
-          ? () => socket.emit("vote", { slotId: slot.id }, (r) => { if (r?.error) alert(r.error); })
-          : null,
-      }));
-    }
-
-    if (canVote) {
-      msgs.push(voted
-        ? sysLine("vote-locked", `Vote locked — <b>${s.votesIn}/${s.votersTotal}</b> in.`)
-        : sysLine("vote-count", `${s.votesIn} of ${s.votersTotal} have voted…`));
-    } else {
-      msgs.push(sysLine("vote-count", `${s.votesIn} of ${s.votersTotal} have voted…`));
-    }
+    const options = (s.slots || []).map((slot) => ({
+      id: slot.id,
+      text: slot.text,
+      picked: priv?.myVote === slot.id,
+      onVote: canVote && !voted
+        ? () => socket.emit("vote", { slotId: slot.id }, (r) => { if (r?.error) alert(r.error); })
+        : null,
+    }));
+    msgs.push(pollRow("vote-poll-" + s.itemIndex, {
+      title: "Who's the human?", sub, options, mode: "voting", live: canVote && !voted,
+    }));
   }
 
   else if (phase === "reveal") {
@@ -487,20 +529,25 @@ function buildThread(s) {
       for (const [voter, slotId] of Object.entries(rv.votes || {})) {
         (votersBySlot[slotId] = votersBySlot[slotId] || []).push(voter);
       }
-      for (const slot of s.slots || []) {
+      const totalVotes = Object.values(rv.tally || {}).reduce((a, b) => a + b, 0);
+      const options = (s.slots || []).map((slot) => {
         const count = rv.tally[slot.id] || 0;
-        const voters = (votersBySlot[slot.id] || []).map((v) => escapeHtml(nameOf(v))).join(", ");
-        msgs.push(bubbleRow({
-          key: "rev-slot-" + s.itemIndex + "-" + slot.id,
-          side: "in", name: MACHINE,
-          html: `<span class="tag">${escapeHtml(slot.id)}</span>${escapeHtml(slot.text)}`,
-          humanPick: slot.isHuman,
-          picked: priv?.myVote === slot.id && !slot.isHuman,
-          badgeHtml: slot.isHuman ? "🎭 the human" : "🤖 machine",
-          tapbackHtml: count > 0 ? `✋ ${count}` : null,
-          metaHtml: voters ? `<span class="voters">picked by ${voters}</span>` : null,
-        }));
-      }
+        return {
+          id: slot.id,
+          text: slot.text,
+          count,
+          share: totalVotes ? Math.round((count / totalVotes) * 100) : 0,
+          voters: (votersBySlot[slot.id] || []).map((v) => nameOf(v)),
+          isHuman: slot.isHuman,
+          correct: slot.isHuman,
+          picked: priv?.myVote === slot.id,
+        };
+      });
+      msgs.push(pollRow("rev-poll-" + s.itemIndex, {
+        title: "Poll results",
+        sub: `The human was <b>${escapeHtml(rv.humanSlotId)}</b> · ${rv.caught}/${rv.votersTotal} caught it`,
+        options, mode: "reveal",
+      }));
 
       const iWasAnswerer = rv.answererId === me.memberId;
       const myVote = priv?.myVote;
