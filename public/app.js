@@ -18,6 +18,10 @@ let priv = null;   // my private state (role, my answer, my vote)
 
 let renderedPhase = null;
 let renderedRound = null;
+let renderedItem = null;
+let answerTargetItem = null; // the item id the answer compose box submits to
+
+const CATCH_POINTS = 100; // matches the server's flat bonus for catching a human
 
 function show(el) { el.classList.remove("hidden"); }
 function hide(el) { el.classList.add("hidden"); }
@@ -213,44 +217,54 @@ function escapeHtml(s) {
 }
 const PHASE_LABELS = {
   lobby: "gathering",
-  prompt: "the prompt",
-  answering: "answers incoming",
+  prompt: "write a prompt",
+  answering: "answer up",
   voting: "the vote",
   reveal: "the reveal",
+  gameover: "game over",
 };
 
 // ── render ─────────────────────────────────────────────────────────────────
 
-const STAGES = ["stageLobby", "stagePrompt", "stageAnswering", "stageVoting", "stageReveal"];
+const STAGES = [
+  "stageLobby", "stagePrompt", "stageAnswering", "stageVoting", "stageReveal", "stageGameover",
+];
 
 function render() {
   if (!latest) return;
   const s = latest;
   const phase = s.phase;
 
-  if (phase !== renderedPhase || s.round !== renderedRound) {
+  // clear compose fields when the game, phase, or voted item turns over
+  if (phase !== renderedPhase || s.gameRound !== renderedRound || s.itemIndex !== renderedItem) {
     renderedPhase = phase;
-    renderedRound = s.round;
-    // clear compose fields when the round or phase turns over
+    renderedRound = s.gameRound;
+    renderedItem = s.itemIndex;
     $("promptInput").value = "";
     $("answerInput").value = "";
     $("promptCount").textContent = "0";
     $("answerCount").textContent = "0";
+    $("promptSend").disabled = false;
+    $("answerSend").disabled = false;
   }
 
   // phase banner
   $("phaseLabel").textContent = PHASE_LABELS[phase] || phase;
   $("phaseLabel").dataset.phase = phase;
   const waitBits = [];
-  if (s.round > 0) waitBits.push(`round ${s.round}`);
-  if (phase === "voting") waitBits.push(`${s.votesIn}/${s.votersTotal} votes in`);
+  if (s.gameRound > 0 && phase !== "gameover") waitBits.push(`game ${s.gameRound}`);
+  if (phase === "prompt") waitBits.push(`${s.promptsIn}/${s.playersTotal} prompts in`);
+  if (phase === "answering") waitBits.push(`${s.answersIn}/${s.itemsTotal} answers in`);
+  if (phase === "voting") waitBits.push(`prompt ${s.itemIndex + 1}/${s.itemsTotal} · ${s.votesIn}/${s.votersTotal} votes`);
+  if (phase === "reveal") waitBits.push(`prompt ${s.itemIndex + 1}/${s.itemsTotal}`);
   $("waitLabel").textContent = waitBits.join(" · ");
 
   // settings
   $("setAiCount").value = s.aiCount;
   $("setSlotHint").textContent = s.slotCount;
+  if (s.maxRounds !== undefined) $("setMaxRounds").value = s.maxRounds;
   $("aiModeNote").textContent = s.hasAi
-    ? "live mode: answers are written by the machine from your prompt."
+    ? "live mode: decoy answers are written by the machine from each prompt."
     : "offline mode: no API key set, so decoy answers come from a canned pool (they won't match the prompt).";
 
   // lobby-only controls
@@ -260,7 +274,6 @@ function render() {
 
   // role banner
   renderRoleNote(s);
-  $("stalledNote").classList.toggle("hidden", !s.stalled || !me.isHost);
 
   // stages
   for (const id of STAGES) hide($(id));
@@ -270,6 +283,7 @@ function render() {
     answering: "stageAnswering",
     voting: "stageVoting",
     reveal: "stageReveal",
+    gameover: "stageGameover",
   }[phase];
   if (stage) show($(stage));
 
@@ -278,27 +292,38 @@ function render() {
   if (phase === "answering") renderAnswering(s);
   if (phase === "voting") renderVoting(s);
   if (phase === "reveal") renderReveal(s);
+  if (phase === "gameover") renderGameover(s);
 
   renderMembers(s, phase);
 }
 
 function renderRoleNote(s) {
   const el = $("roleNote");
-  if (s.phase === "lobby" || s.phase === "reveal") { hide(el); return; }
-  const iAmOperator = s.promptMasterId === me.memberId;
-  const iAmImposter = !!priv?.isImposter;
+  const p = s.phase;
+  if (p === "lobby" || p === "reveal" || p === "gameover") { hide(el); return; }
   let note = "";
-  if (iAmOperator) {
-    note = "🛰 you're the operator. write the prompt — you're on the town's side, so make it one an imposter can't fake.";
-  } else if (iAmImposter) {
-    note = "🎭 you're the imposter. blend in with the machine. don't get caught.";
-  } else if (priv?.role === "spectator") {
-    note = "👁 you joined mid-round — you're watching this one. you'll be dealt in next round.";
-  } else {
-    note = "🔍 you're a detective. read the answers and vote for the one written by a human.";
+  let role = "player";
+  if (priv?.role === "spectator") {
+    note = "👁 you joined mid-game — you're watching this one. you'll be dealt in next game.";
+    role = "spectator";
+  } else if (p === "prompt") {
+    note = priv?.hasPrompt
+      ? "✓ prompt in. sit tight while the rest of the channel writes theirs."
+      : "✍ write a prompt for the machine. someone else will have to fake an answer to it.";
+  } else if (p === "answering") {
+    const list = priv?.assignments || [];
+    const done = list.length > 0 && list.every((a) => a.answered);
+    note = done
+      ? "🎭 answer planted. now you're just another face in the line-up."
+      : "🎭 you're the imposter for the prompt below — answer it like the machine would.";
+  } else if (p === "voting") {
+    note = priv?.amAnswerer
+      ? "🎭 your fake answer is in this line-up. sit tight and hope they miss it."
+      : "🔍 one of these answers has a pulse. read them and vote for the human.";
+    role = priv?.amAnswerer ? "imposter" : "voter";
   }
   el.textContent = note;
-  el.dataset.role = iAmOperator ? "operator" : iAmImposter ? "imposter" : priv?.role === "spectator" ? "spectator" : "voter";
+  el.dataset.role = role;
   show(el);
 }
 
@@ -308,67 +333,87 @@ function renderLobbyStage(s) {
   if (n < s.minPlayers) {
     hint = `${n} on the channel — need at least ${s.minPlayers} to play. share the link.`;
   } else if (s.isTest) {
-    hint = `${n} on the channel. start the round, then run it solo — the bots write, answer, and vote themselves.`;
+    hint = `${n} on the channel. boot the game, then run it solo — the bots write, answer, and vote themselves.`;
   } else {
-    hint = `${n} on the channel. each round one of you is the operator, one is the secret imposter, and the rest hunt.`;
+    hint = `${n} on the channel. everyone writes a prompt, everyone fakes an answer to someone else's, then the table votes to unmask the humans.`;
   }
   $("lobbyHint").textContent = hint;
   $("botRow").classList.toggle("hidden", !(s.isTest && me.isHost));
   $("startRow").classList.toggle("hidden", !me.isHost);
   $("startBtn").disabled = n < s.minPlayers;
-  $("startBtn").textContent = n < s.minPlayers ? `need ${s.minPlayers}+ players` : "start the round";
+  $("startBtn").textContent = n < s.minPlayers ? `need ${s.minPlayers}+ players` : "▶ boot the game";
 }
 
 function renderPrompt(s) {
-  const iAmOperator = s.promptMasterId === me.memberId;
-  $("promptLead").textContent = iAmOperator
-    ? "you're the operator. ask the machine a question — the imposter will try to answer it just like the machine does."
-    : `${nameOf(s.promptMasterId)} is the operator, composing a prompt for the machine…`;
-  $("promptCompose").classList.toggle("hidden", !iAmOperator);
+  const submitted = !!priv?.hasPrompt;
+  const spectator = priv?.role === "spectator";
+  $("promptCompose").classList.toggle("hidden", submitted || spectator);
+  $("promptDone").classList.toggle("hidden", !submitted || spectator);
+  const waiting = s.promptsIn < s.playersTotal;
+  $("promptProgress").classList.toggle("hidden", !waiting);
+  $("promptProgressText").textContent = `${s.promptsIn}/${s.playersTotal} prompts transmitted…`;
+  $("promptSkipRow").classList.toggle("hidden", !(me.isHost && s.promptsIn > 0));
 }
 
 function renderAnswering(s) {
-  $("answeringPrompt").textContent = s.prompt || "";
-  const iAmImposter = !!priv?.isImposter;
-  const iAmOperator = s.promptMasterId === me.memberId;
-  const planted = priv?.myAnswer != null;
+  const assignments = priv?.assignments || [];
+  const spectator = priv?.role === "spectator";
 
-  $("answerCompose").classList.toggle("hidden", !(iAmImposter && !planted));
-  $("answerDone").classList.toggle("hidden", !(iAmImposter && planted));
-
-  const stillWaiting = s.aiPending || (iAmImposter ? false : true);
-  $("answeringSpinner").classList.toggle("hidden", !stillWaiting || (iAmImposter && !planted));
-
-  if (iAmImposter) {
-    $("answeringHead").textContent = planted ? "answer planted" : "your move, ghost";
-    $("answeringLead").textContent = planted
-      ? "waiting on the machine to finish its answers, then it goes to the vote."
-      : "write one answer to the prompt that could pass for the machine's. it gets shuffled in with the real ones.";
-    $("answeringSpinnerText").textContent = "the machine is composing the rest…";
-  } else {
-    $("answeringHead").textContent = "answers incoming";
-    $("answeringLead").textContent = iAmOperator
-      ? "the machine is writing its answers — and somewhere out there, so is the imposter."
-      : "the machine is writing its answers — and one of you is quietly writing a fake.";
-    $("answeringSpinnerText").textContent = s.aiPending
-      ? "the machine is composing…"
-      : "waiting on the last answer…";
+  const box = $("assignmentBox");
+  box.innerHTML = "";
+  let pending = null;
+  for (const a of assignments) {
+    const el = document.createElement("div");
+    el.className = "assignment" + (a.answered ? " answered" : "");
+    el.innerHTML = `
+      <div class="assignment-tag">${a.answered ? "✓ your answer" : "🎭 fake an answer to this"}</div>
+      <div class="prompt-quote">${escapeHtml(a.promptText)}</div>
+      ${a.answered ? `<div class="assignment-answer">&ldquo;${escapeHtml(a.myAnswer)}&rdquo;</div>` : ""}
+    `;
+    box.appendChild(el);
+    if (!a.answered && !pending) pending = a;
   }
+  answerTargetItem = pending?.itemId || null;
+
+  const composing = !!pending && !spectator;
+  $("answerCompose").classList.toggle("hidden", !composing);
+  const allDone = assignments.length > 0 && assignments.every((a) => a.answered);
+  $("answerDone").classList.toggle("hidden", !(allDone && !composing));
+
+  const waiting = !composing;
+  $("answeringSpinner").classList.toggle("hidden", !waiting);
+  const aiLeft = (s.itemsTotal || 0) - (s.aiReady || 0);
+  $("answeringSpinnerText").textContent = aiLeft > 0
+    ? `the machine is composing decoys (${s.aiReady}/${s.itemsTotal})…`
+    : `waiting on the last answers (${s.answersIn}/${s.itemsTotal})…`;
+
+  $("answeringHead").textContent = composing
+    ? "answer as the machine"
+    : allDone ? "answer planted" : "answers incoming";
+  $("answeringLead").classList.toggle("hidden", !composing && !spectator);
+  if (spectator) {
+    $("answeringLead").textContent = "the table is faking answers to each other's prompts. you're in next game.";
+  } else if (composing) {
+    $("answeringLead").textContent = "you've been handed someone else's prompt. answer it so convincingly nobody guesses a human wrote it.";
+  }
+
+  $("answerSkipRow").classList.toggle("hidden", !(me.isHost && (s.aiReady || 0) > 0 && (s.answersIn || 0) > 0));
 }
 
 function renderVoting(s) {
+  $("votingChip").textContent = `prompt ${s.itemIndex + 1} of ${s.itemsTotal}`;
   $("votingPrompt").textContent = s.prompt || "";
-  const iAmImposter = !!priv?.isImposter;
-  const iAmOperator = s.promptMasterId === me.memberId;
-  const canVote = !iAmImposter && priv?.role !== "spectator";
+  const amAnswerer = !!priv?.amAnswerer;
+  const spectator = priv?.role === "spectator";
+  const canVote = !amAnswerer && !spectator;
   const voted = priv?.myVote !== undefined;
 
-  $("votingLead").textContent = iAmImposter
-    ? "your answer is in the line-up. sit tight and hope they miss it."
-    : !canVote
-      ? "you're watching this round — no vote."
+  $("votingLead").textContent = amAnswerer
+    ? "this is your prompt — your fake answer is in the line-up. sit tight."
+    : spectator
+      ? "you're watching this game — no vote."
       : voted
-        ? "vote locked. see if the others can spot the human too."
+        ? "vote locked. see if the rest of the table can spot the human too."
         : "one of these was written by a human pretending to be the machine. tap the impostor.";
 
   const box = $("slotList");
@@ -400,20 +445,22 @@ function renderVoting(s) {
 
 function renderReveal(s) {
   const rv = s.reveal;
+  $("revealChip").textContent = `prompt ${s.itemIndex + 1} of ${s.itemsTotal}`;
   $("revealPrompt").textContent = s.prompt || "";
   if (!rv) return;
 
-  const iWasImposter = rv.imposterId === me.memberId;
+  const iWasAnswerer = rv.answererId === me.memberId;
   const myVote = priv?.myVote;
   const gotIt = myVote === rv.humanSlotId;
 
   $("revealHead").textContent = "the human was " + rv.humanSlotId;
-  let lead = `${escapeHtml(nameOf(rv.imposterId))} was the imposter. `;
-  lead += `${rv.caught} of ${rv.votersTotal} spotted them; ${rv.fooled} got fooled.`;
-  if (iWasImposter) {
-    lead += rv.fooled > 0 ? ` you fooled ${rv.fooled} — +${rv.fooled} to you.` : " nobody bit. tough crowd.";
+  let lead = `${escapeHtml(rv.answererName)} faked the answer to ${escapeHtml(rv.authorName)}'s prompt. `;
+  lead += `${rv.caught} of ${rv.votersTotal} spotted it; ${rv.fooled} got fooled.`;
+  if (iWasAnswerer) {
+    lead += rv.impPts > 0 ? ` you fooled ${rv.fooled} — +${rv.impPts} to you.` : " everyone caught you. no points.";
   } else if (priv?.role !== "spectator" && myVote !== undefined) {
-    lead += gotIt ? " you nailed it — +1." : " you got fooled.";
+    const got = rv.points?.[me.memberId] || CATCH_POINTS;
+    lead += gotIt ? ` you nailed it — +${got}.` : " you got fooled.";
   }
   $("revealLead").textContent = lead;
 
@@ -443,17 +490,28 @@ function renderReveal(s) {
     box.appendChild(el);
   }
 
-  renderScoreboard(s);
+  renderScoreboard(s.scoreboard, "scoreboard");
+  $("nextBtn").textContent = s.isLastItem ? "▶ final results" : "▶ next prompt";
   $("nextRow").classList.toggle("hidden", !me.isHost);
 }
 
-function renderScoreboard(s) {
-  const box = $("scoreboard");
+function renderGameover(s) {
+  const w = s.winner;
+  $("gameoverLead").textContent = w && w.score > 0
+    ? `${w.name} wins with ${w.score} point${w.score === 1 ? "" : "s"}.`
+    : "a dead heat — nobody scored. brutal.";
+  renderScoreboard(s.finalBoard, "finalBoard");
+  $("againRow").classList.toggle("hidden", !me.isHost);
+}
+
+function renderScoreboard(board, targetId) {
+  const box = $(targetId);
   box.innerHTML = `<h3 class="score-head">scores</h3>`;
   const list = document.createElement("div");
   list.className = "score-list";
-  const top = (s.scoreboard || [])[0]?.score || 0;
-  for (const row of s.scoreboard || []) {
+  const rows = board || [];
+  const top = rows[0]?.score || 0;
+  for (const row of rows) {
     const el = document.createElement("div");
     el.className = "score-row" + (row.score > 0 && row.score === top ? " leader" : "");
     el.innerHTML = `
@@ -468,27 +526,22 @@ function renderScoreboard(s) {
 function renderMembers(s, phase) {
   const ul = $("members");
   ul.innerHTML = "";
-  const showVoteStatus = phase === "voting";
+  const live = phase !== "lobby" && phase !== "gameover";
   for (const m of s.members) {
     const li = document.createElement("li");
-    const spectating = !m.inRound && phase !== "lobby";
+    const spectating = !m.inGame && live;
     if (spectating) li.classList.add("spectating");
-    if (showVoteStatus && m.acted && m.inRound && m.id !== s.promptMasterId) li.classList.add("acted");
+    if (live && m.acted && m.inGame) li.classList.add("acted");
     const tags = [];
     if (m.id === me.memberId) tags.push(`<span class="you-tag">you</span>`);
     if (m.isHost) tags.push(`<span class="host-tag">🛰 host</span>`);
     if (m.isBot) tags.push(`<span class="bot-tag">🤖</span>`);
-    // the operator is public; the imposter never is
-    if (phase !== "lobby" && m.id === s.promptMasterId) tags.push(`<span class="op-tag">operator</span>`);
 
     let status = "";
-    if (phase === "lobby") status = "";
-    else if (spectating) status = "watching";
-    else if (m.id === s.promptMasterId && phase === "prompt") status = "writing…";
-    else if (showVoteStatus && m.id !== s.promptMasterId && m.inRound) {
-      // don't out the imposter: everyone still shows a normal voting status
-      status = m.acted ? "voted ✓" : "deciding…";
-    }
+    if (spectating) status = "watching";
+    else if (phase === "prompt") status = m.acted ? "prompt in ✓" : "writing…";
+    else if (phase === "answering") status = m.acted ? "answer in ✓" : "faking…";
+    else if (phase === "voting") status = m.acted ? "voted ✓" : "deciding…";
 
     li.innerHTML = `
       <div class="m-main">
@@ -555,9 +608,12 @@ $("addBotsBtn").addEventListener("click", () => {
   const count = Math.max(1, Math.min(12, parseInt($("botCount").value, 10) || 1));
   emitSimple("addBots")({ count });
 });
-$("startBtn").addEventListener("click", () => emitSimple("startRound")());
-$("nextBtn").addEventListener("click", () => emitSimple("startRound")());
-$("closeVoteBtn").addEventListener("click", () => emitSimple("closeVoting")());
+$("startBtn").addEventListener("click", () => emitSimple("startGame")());
+$("againBtn").addEventListener("click", () => emitSimple("startGame")());
+$("nextBtn").addEventListener("click", () => emitSimple("advance")());
+$("closeVoteBtn").addEventListener("click", () => emitSimple("advance")());
+$("promptSkipBtn").addEventListener("click", () => emitSimple("advance")());
+$("answerSkipBtn").addEventListener("click", () => emitSimple("advance")());
 
 // prompt compose
 $("promptInput").addEventListener("input", () => {
@@ -581,7 +637,7 @@ $("answerSend").addEventListener("click", () => {
   const answer = $("answerInput").value.trim();
   if (answer.length < 3) { alert("write a real answer"); return; }
   $("answerSend").disabled = true;
-  socket.emit("submitAnswer", { answer }, (r) => {
+  socket.emit("submitAnswer", { itemId: answerTargetItem, answer }, (r) => {
     $("answerSend").disabled = false;
     if (r?.error) alert(r.error);
   });
@@ -610,6 +666,11 @@ $("setAiCount").addEventListener("change", () => {
   $("setAiCount").value = aiCount;
   $("setSlotHint").textContent = aiCount + 1;
   socket.emit("settings", { settings: { aiCount } });
+});
+$("setMaxRounds").addEventListener("change", () => {
+  const maxRounds = Math.max(1, Math.min(12, parseInt($("setMaxRounds").value, 10) || 8));
+  $("setMaxRounds").value = maxRounds;
+  socket.emit("settings", { settings: { maxRounds } });
 });
 
 $("copyLink").addEventListener("click", async () => {

@@ -24,7 +24,7 @@ const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
 const TEST_PIN = process.env.TEST_PIN ?? "GHOST";
 
 // the Anthropic client is optional. with a key set, decoy answers are written
-// live from the operator's prompt; without one, we fall back to a canned pool
+// live from each player's prompt; without one, we fall back to a canned pool
 // so the game is still playable (and testable) offline - just less pointed.
 const anthropic = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({ maxRetries: 1 })
@@ -58,11 +58,18 @@ const tok = () => crypto.randomBytes(16).toString("hex");
 // slot labels for the line-up of answers (A, B, C, ...)
 const LABELS = "ABCDEFGH".split("");
 
+// scoring, imposter-jackbox style. a detective who fingers the human banks a
+// flat catch bonus; the human (imposter for that prompt) banks up to MAX_FOOL,
+// scaled by the share of voters they slipped past - full marks if nobody spots
+// them, nothing if everyone does.
+const CATCH_POINTS = 100;
+const MAX_FOOL = 100;
+
 // ---------------------------------------------------------------------------
 // the machine's voice. when a key is present we ask the model for N distinct
-// answers to the operator's prompt; the imposter's single answer is shuffled
-// in among them. these instructions try to keep the machine answers natural
-// and varied so the human has cover to hide behind.
+// answers to a player's prompt; that prompt's human answer is shuffled in among
+// them. these instructions try to keep the machine answers natural and varied
+// so the human has cover to hide behind.
 // ---------------------------------------------------------------------------
 
 const systemPrompt = (n) =>
@@ -137,8 +144,10 @@ function capSentences(s, maxSentences = 3, maxChars = 320) {
 
 // take whatever the model returned (or nothing) and make it exactly n distinct,
 // non-empty answers - padding from the canned pool if the model came up short.
-function normalizeAnswers(raw, n) {
-  const seen = new Set();
+// `avoid` holds text already spoken for (e.g. the human's answer) so a decoy
+// can't accidentally duplicate it.
+function normalizeAnswers(raw, n, avoid = []) {
+  const seen = new Set(avoid.map((t) => capSentences(t).toLowerCase()));
   const out = [];
   const push = (t) => {
     const c = capSentences(t);
@@ -175,13 +184,17 @@ async function generateAiResponses(prompt, n) {
 }
 
 // ---------------------------------------------------------------------------
-// rooms - one operator (host), everyone else joins with a code. same room /
+// rooms - a host opens a channel, everyone else joins with a code. same room /
 // socket / redis plumbing as the deck app this grew out of.
 // ---------------------------------------------------------------------------
 
-const defaultSettings = () => ({ aiCount: 4 });
+const defaultSettings = () => ({ aiCount: 4, maxRounds: 8 });
 const aiCountOf = (s) => Math.max(2, Math.min(6, Math.floor(Number(s?.aiCount)) || 4));
-const MIN_PLAYERS = 3; // one operator, one imposter, and at least one voter
+// how many prompts actually go up for a vote. with a small table everyone's
+// prompt gets played; a big table caps the number of voting rounds so a game
+// doesn't drag. everyone still writes a prompt and an answer either way.
+const maxRoundsOf = (s) => Math.max(1, Math.min(12, Math.floor(Number(s?.maxRounds)) || 8));
+const MIN_PLAYERS = 3; // enough that every prompt has an answerer plus a voter
 
 const isTestRoom = (r) => typeof r === "string" && r.startsWith("TEST-");
 const nsFor = (r) => (isTestRoom(r) ? "testroom" : "room");
@@ -211,12 +224,10 @@ async function loadRoom(roomId) {
   const raw = await redis.get(keys.game(roomId));
   const game = raw ? JSON.parse(raw) : null;
   if (game) {
-    game.votes ??= {};
+    game.prompts ??= {};
+    game.items ??= [];
     game.scores ??= {};
-    game.aiPending ??= false;
-    game.aiResponses ??= null;
-    game.slots ??= null;
-    game.reveal ??= null;
+    game.currentItem ??= 0;
   }
   const settings = meta.settings ? JSON.parse(meta.settings) : defaultSettings();
   const bots = new Set(await redis.smembers(keys.bots(roomId)));
@@ -248,126 +259,180 @@ async function withLock(roomId, fn) {
 }
 
 // ---------------------------------------------------------------------------
-// the round. phases: prompt -> answering -> voting -> reveal. one operator
-// writes a prompt; a secret imposter writes one answer; the machine writes the
-// rest; everyone votes on which answer has a pulse.
+// the game. one game is a full round-trip:
+//
+//   prompt     - EVERYONE writes one prompt at the same time
+//   answering  - EVERYONE is handed someone else's prompt and answers it as if
+//                they were the machine, all at once; the model writes decoys
+//                for every prompt in parallel
+//   voting     - the table votes on the answers to one prompt at a time
+//   reveal     - who was human, who got fooled, points; host advances
+//   ...voting/reveal repeat for each prompt that's in play...
+//   gameover   - final leaderboard
+//
+// there's no per-round operator anymore: everybody types, every round.
 // ---------------------------------------------------------------------------
 
-function pickRoles(memberIds, prev) {
-  const ids = shuffle(memberIds);
-  // rotate the operator off the previous one when we can
-  let promptMasterId = ids.find((id) => id !== prev?.promptMasterId) ?? ids[0];
-  // the imposter is anyone but the operator; avoid a repeat when possible
-  const pool = memberIds.filter((id) => id !== promptMasterId);
-  let imposterId =
-    shuffle(pool).find((id) => id !== prev?.imposterId) ?? shuffle(pool)[0];
-  return { promptMasterId, imposterId };
-}
-
-function newRound(memberIds, prev) {
-  const { promptMasterId, imposterId } = pickRoles(memberIds, prev);
+function newGame(memberIds) {
+  const scores = Object.fromEntries(memberIds.map((id) => [id, 0]));
   return {
-    round: prev ? prev.round + 1 : 1,
-    phase: "prompt", // prompt -> answering -> voting -> reveal
-    players: [...memberIds], // snapshot: who's dealt into this round
-    promptMasterId,
-    imposterId,
-    prompt: null,
-    aiPending: false,
-    aiResponses: null,
-    imposterAnswer: null,
-    slots: null, // [{ id, text, isHuman, authorId }] once the line-up is set
-    votes: {}, // memberId -> slotId
-    reveal: null,
-    scores: prev?.scores ? { ...prev.scores } : {}, // carry the running tally
+    gameRound: 1,
+    phase: "prompt", // prompt -> answering -> voting <-> reveal -> gameover
+    players: [...memberIds], // snapshot: who's dealt into this game
+    prompts: {}, // playerId -> prompt text
+    items: [], // one per prompt in play (built when answering opens)
+    currentItem: 0,
+    scores,
   };
 }
 
-const votersOf = (g) => g.players.filter((id) => id !== g.imposterId);
+const activePlayers = (g, members) => g.players.filter((id) => members[id]);
 
-// build the shuffled line-up once both the imposter and the machine are in
-function maybeBuildSlots(g) {
-  if (g.phase !== "answering") return false;
-  if (g.imposterAnswer == null || g.aiPending || !Array.isArray(g.aiResponses)) return false;
-  const entries = shuffle([
-    { text: capSentences(g.imposterAnswer), isHuman: true, authorId: g.imposterId },
-    ...g.aiResponses.map((t) => ({ text: t, isHuman: false, authorId: null })),
-  ]);
-  g.slots = entries.map((e, i) => ({ id: LABELS[i], ...e }));
-  g.votes = {};
-  g.phase = "voting";
-  return true;
-}
+// who may vote on a given item: everyone in the game except the person who
+// wrote that item's human answer (they'd know their own).
+const eligibleVoters = (g, item) => g.players.filter((id) => id !== item.answererId);
 
-// close the vote: tally, reveal the pulse, and score. detectives who fingered
-// the human earn a point each; the imposter earns one for every voter fooled.
-function closeVoting(g) {
-  const human = g.slots.find((s) => s.isHuman);
-  const tally = Object.fromEntries(g.slots.map((s) => [s.id, 0]));
-  for (const v of Object.values(g.votes)) if (tally[v] !== undefined) tally[v] += 1;
-
-  let caught = 0;
-  let fooled = 0;
-  for (const voter of votersOf(g)) {
-    const v = g.votes[voter];
-    if (v === undefined) continue;
-    if (v === human.id) {
-      caught += 1;
-      g.scores[voter] = (g.scores[voter] || 0) + 1;
-    } else {
-      fooled += 1;
+// hand each prompt in play to exactly one answerer who didn't write it, keeping
+// the load even across the table so - with a small group - everyone answers
+// once. greedy min-load with a few reshuffles lands a near-derangement.
+function assignAnswerers(items, playerIds) {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const load = Object.fromEntries(playerIds.map((id) => [id, 0]));
+    for (const it of items) it.answererId = null;
+    let ok = true;
+    for (const it of shuffle(items)) {
+      const cands = shuffle(playerIds.filter((id) => id !== it.authorId));
+      if (!cands.length) { ok = false; break; }
+      const min = Math.min(...cands.map((id) => load[id]));
+      const pickId = shuffle(cands.filter((id) => load[id] === min))[0];
+      it.answererId = pickId;
+      load[pickId] += 1;
+    }
+    const loads = playerIds.map((id) => load[id]);
+    const spread = Math.max(...loads) - Math.min(...loads);
+    if (ok && spread <= 1 && items.every((it) => it.answererId && it.answererId !== it.authorId)) return;
+  }
+  // last-resort fill so nothing is left unassigned
+  for (const it of items) {
+    if (!it.answererId || it.answererId === it.authorId) {
+      it.answererId = shuffle(playerIds.filter((id) => id !== it.authorId))[0] || playerIds[0];
     }
   }
-  g.scores[g.imposterId] = (g.scores[g.imposterId] || 0) + fooled;
+}
 
-  g.reveal = {
+// close the prompt phase: turn the submitted prompts into playable items,
+// capped at maxRounds, and hand out answering assignments.
+function startAnswering(r) {
+  const g = r.game;
+  const cap = maxRoundsOf(r.settings);
+  let authors = shuffle(g.players.filter((id) => g.prompts[id] != null));
+  if (authors.length > cap) authors = authors.slice(0, cap);
+  g.items = authors.map((aid, i) => ({
+    id: `I${i + 1}`,
+    promptText: g.prompts[aid],
+    authorId: aid,
+    answererId: null,
+    humanAnswer: null,
+    aiResponses: null,
+    aiPending: true,
+    slots: null,
+    votes: {},
+    reveal: null,
+  }));
+  assignAnswerers(g.items, g.players);
+  g.phase = "answering";
+}
+
+// build the shuffled line-up for one item once its human answer and the
+// machine's decoys are both in.
+function buildSlots(item) {
+  if (item.slots) return;
+  const entries = shuffle([
+    { text: capSentences(item.humanAnswer), isHuman: true, authorId: item.answererId },
+    ...item.aiResponses.map((t) => ({ text: t, isHuman: false, authorId: null })),
+  ]);
+  item.slots = entries.map((e, i) => ({ id: LABELS[i], ...e }));
+}
+
+const itemReady = (it) =>
+  it.humanAnswer != null && Array.isArray(it.aiResponses) && !it.aiPending;
+
+// close the vote on one item: tally, reveal the pulse, and score. detectives
+// who fingered the human bank a flat catch bonus; the human banks a share of
+// MAX_FOOL for every voter they slipped past.
+function closeItemVoting(g, item) {
+  const human = item.slots.find((s) => s.isHuman);
+  const tally = Object.fromEntries(item.slots.map((s) => [s.id, 0]));
+  for (const v of Object.values(item.votes)) if (tally[v] !== undefined) tally[v] += 1;
+
+  const voters = eligibleVoters(g, item);
+  const points = {};
+  let caught = 0;
+  let voted = 0;
+  for (const voter of voters) {
+    const v = item.votes[voter];
+    if (v === undefined) continue;
+    voted += 1;
+    if (v === human.id) {
+      caught += 1;
+      points[voter] = (points[voter] || 0) + CATCH_POINTS;
+    }
+  }
+  const fooled = voted - caught;
+  const impPts = voted ? Math.round((MAX_FOOL * fooled) / voted) : 0;
+  if (impPts) points[item.answererId] = (points[item.answererId] || 0) + impPts;
+
+  for (const [id, d] of Object.entries(points)) g.scores[id] = (g.scores[id] || 0) + d;
+
+  item.reveal = {
     humanSlotId: human.id,
-    imposterId: g.imposterId,
+    answererId: item.answererId,
+    authorId: item.authorId,
     tally,
-    votes: { ...g.votes },
+    votes: { ...item.votes },
     caught,
     fooled,
+    voted,
+    votersTotal: voters.length,
+    impPts,
+    points,
   };
   g.phase = "reveal";
 }
 
-function recheckVoting(g) {
-  if (g.phase !== "voting") return false;
-  const voters = votersOf(g);
-  if (voters.length && voters.every((id) => g.votes[id] !== undefined)) {
-    closeVoting(g);
-    return true;
-  }
-  return false;
-}
-
 // ---------------------------------------------------------------------------
 // live decoy generation. kicking the model is async, so it happens outside the
-// per-room lock; the result is written back under the lock once it lands. a
-// per-round in-flight guard keeps a single request from firing twice.
+// per-room lock; results are written back under the lock once they land. one
+// request per item, guarded so it can't fire twice.
 // ---------------------------------------------------------------------------
 
 const aiInFlight = new Set();
 
 function ensureAiKicked(roomId, g, aiCount) {
-  if (!g || g.phase !== "answering" || !g.aiPending || g.prompt == null) return;
-  const key = `${roomId}:${g.round}`;
-  if (aiInFlight.has(key)) return;
-  aiInFlight.add(key);
-  generateAndStore(roomId, g.round, g.prompt, aiCount).finally(() => aiInFlight.delete(key));
+  if (!g || g.phase !== "answering") return;
+  for (const it of g.items) {
+    if (!it.aiPending || Array.isArray(it.aiResponses)) continue;
+    const key = `${roomId}:${g.gameRound}:${it.id}`;
+    if (aiInFlight.has(key)) continue;
+    aiInFlight.add(key);
+    generateAndStore(roomId, g.gameRound, it.id, it.promptText, it.humanAnswer, aiCount)
+      .finally(() => aiInFlight.delete(key));
+  }
 }
 
-async function generateAndStore(roomId, round, prompt, aiCount) {
+async function generateAndStore(roomId, round, itemId, prompt, humanAnswer, aiCount) {
   const raw = await generateAiResponses(prompt, aiCount);
-  const answers = normalizeAnswers(raw, aiCount);
+  const answers = normalizeAnswers(raw, aiCount, humanAnswer ? [humanAnswer] : []);
   await withLock(roomId, async () => {
     const r = await loadRoom(roomId);
     if (!r || !r.game) return;
     const g = r.game;
-    if (g.round !== round || g.phase !== "answering" || !g.aiPending) return; // stale
-    g.aiResponses = answers;
-    g.aiPending = false;
-    progress(r); // may build the line-up and let bot voters weigh in
+    if (g.gameRound !== round || g.phase !== "answering") return; // stale
+    const it = g.items.find((x) => x.id === itemId);
+    if (!it || Array.isArray(it.aiResponses)) return;
+    it.aiResponses = answers;
+    it.aiPending = false;
+    settle(r); // may open the vote once every item is ready
     await saveGame(roomId, g);
   });
   broadcast(roomId);
@@ -375,8 +440,8 @@ async function generateAndStore(roomId, round, prompt, aiCount) {
 
 // ---------------------------------------------------------------------------
 // test players (bots): only ever seated in a TEST- room, so one person can run
-// a whole game solo. a bot operator writes a canned prompt, a bot imposter
-// writes a canned answer, and bot voters guess at random.
+// a whole game solo. bots write a canned prompt, answer their assignment with a
+// canned line, and vote at random. the human host still drives the reveals.
 // ---------------------------------------------------------------------------
 
 const BOT_PROMPTS = [
@@ -388,6 +453,10 @@ const BOT_PROMPTS = [
   "Suggest a fun weekend activity that costs nothing.",
   "What's the secret to a good cup of coffee?",
   "How can I get better at remembering people's names?",
+  "What's an underrated life skill everyone should learn?",
+  "How do you politely end a conversation you're stuck in?",
+  "What's a simple way to eat a bit healthier?",
+  "Recommend a way to unwind after a long day.",
 ];
 const BOT_ANSWERS = [
   "Honestly the easiest win is to just show up regularly to the same places - familiarity does a lot of the work for you.",
@@ -395,81 +464,145 @@ const BOT_ANSWERS = [
   "Try working in focused blocks with a clear start and stop time, and put your phone in another room.",
   "Ask people what they've been unreasonably excited about lately - it beats 'what do you do' every time.",
   "Give it bright indirect light and only water it when the top inch of soil is dry to the touch.",
+  "Start with something small and low-stakes, then build on it once it feels like a habit rather than a chore.",
+  "A good rule of thumb is to keep it simple and consistent - the fundamentals matter more than any clever trick.",
+  "The short answer is that it depends on your goals, but a sensible default works well for most people.",
 ];
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// run every pending bot action for the current phase, looping because closing
-// one phase can open the next (a submitted prompt lands in answering, a built
-// line-up lands in voting).
-function driveBots(g, bots) {
-  if (!g || !bots || bots.size === 0) return;
-  for (let guard = 0; guard < 50; guard++) {
-    let acted = false;
-    if (g.phase === "prompt") {
-      if (bots.has(g.promptMasterId) && g.prompt == null) {
-        g.prompt = pick(BOT_PROMPTS);
-        g.phase = "answering";
-        g.aiPending = true;
-        g.aiResponses = null;
-        acted = true;
-      }
-    } else if (g.phase === "answering") {
-      if (bots.has(g.imposterId) && g.imposterAnswer == null) {
-        g.imposterAnswer = pick(BOT_ANSWERS);
-        acted = true;
-      }
-      if (maybeBuildSlots(g)) acted = true;
-    } else if (g.phase === "voting") {
-      for (const id of votersOf(g)) {
-        if (!bots.has(id) || g.votes[id] !== undefined) continue;
-        g.votes[id] = pick(g.slots).id;
-        acted = true;
-      }
-      if (recheckVoting(g)) acted = true;
+// run every pending bot action for the current phase; returns whether anything
+// changed so the settle loop knows to check for phase transitions again.
+function driveBots(r) {
+  const g = r.game;
+  const bots = r.bots;
+  if (!g || !bots || bots.size === 0) return false;
+  let acted = false;
+  if (g.phase === "prompt") {
+    for (const id of g.players) {
+      if (bots.has(id) && g.prompts[id] == null) { g.prompts[id] = pick(BOT_PROMPTS); acted = true; }
     }
-    if (!acted) break;
+  } else if (g.phase === "answering") {
+    for (const it of g.items) {
+      if (bots.has(it.answererId) && it.humanAnswer == null) { it.humanAnswer = pick(BOT_ANSWERS); acted = true; }
+    }
+  } else if (g.phase === "voting") {
+    const it = g.items[g.currentItem];
+    if (it && it.slots) {
+      for (const id of eligibleVoters(g, it)) {
+        if (bots.has(id) && it.votes[id] === undefined) { it.votes[id] = pick(it.slots).id; acted = true; }
+      }
+    }
+  }
+  return acted;
+}
+
+// phase transitions that fire on their own once the table has caught up.
+function maybeStartAnswering(r) {
+  const g = r.game;
+  if (!g || g.phase !== "prompt") return false;
+  const active = activePlayers(g, r.members);
+  if (!active.length || !active.every((id) => g.prompts[id] != null)) return false;
+  startAnswering(r);
+  return true;
+}
+
+function maybeStartVoting(r) {
+  const g = r.game;
+  if (!g || g.phase !== "answering" || !g.items.length) return false;
+  if (!g.items.every(itemReady)) return false;
+  for (const it of g.items) buildSlots(it);
+  g.currentItem = 0;
+  g.phase = "voting";
+  return true;
+}
+
+function maybeCloseItem(r) {
+  const g = r.game;
+  if (!g || g.phase !== "voting") return false;
+  const it = g.items[g.currentItem];
+  if (!it || !it.slots) return false;
+  const voters = eligibleVoters(g, it).filter((id) => r.members[id]);
+  if (!voters.length || !voters.every((id) => it.votes[id] !== undefined)) return false;
+  closeItemVoting(g, it);
+  return true;
+}
+
+// settle whatever the last mutation opened up: let bots act, advance any phase
+// whose gate is satisfied, and loop until nothing else moves.
+function settle(r) {
+  if (!r.game) return;
+  for (let guard = 0; guard < 80; guard++) {
+    let changed = false;
+    if (driveBots(r)) changed = true;
+    if (maybeStartAnswering(r)) changed = true;
+    if (maybeStartVoting(r)) changed = true;
+    if (maybeCloseItem(r)) changed = true;
+    if (!changed) break;
   }
 }
 
-// settle whatever the last mutation opened up: let bots act, build the line-up
-// if it's ready, and close the vote if everyone living is in.
-function progress(r) {
-  const g = r.game;
-  if (!g) return;
-  driveBots(g, r.bots);
-  maybeBuildSlots(g);
-  driveBots(g, r.bots);
-  recheckVoting(g);
+// host advances from a reveal to the next item, or to the final board.
+function advanceItem(g) {
+  if (g.currentItem >= g.items.length - 1) {
+    g.phase = "gameover";
+  } else {
+    g.currentItem += 1;
+    g.phase = "voting";
+  }
 }
 
 // ---------------------------------------------------------------------------
-// pull somebody out of a running round (they left or were dropped)
+// pull somebody out of a running game (they left or were dropped)
 // ---------------------------------------------------------------------------
 
 function removeFromRound(g, memberId) {
   if (!g || !g.players.includes(memberId)) return;
   g.players = g.players.filter((id) => id !== memberId);
-  delete g.votes[memberId];
+  delete g.prompts[memberId];
   delete g.scores[memberId];
-  // if the operator or the imposter walks before their turn, the round can't
-  // finish - flag it so the operator can deal a fresh one.
-  if (g.phase !== "reveal") {
-    if (memberId === g.promptMasterId && g.prompt == null) g.stalled = true;
-    if (memberId === g.imposterId && g.slots == null) g.stalled = true;
+  for (const it of g.items || []) {
+    delete it.votes[memberId];
+    // if they were on the hook to answer a prompt and hadn't yet, hand it off
+    if (it.answererId === memberId && !it.slots && it.humanAnswer == null) {
+      const cands = g.players.filter((id) => id !== it.authorId);
+      it.answererId = cands.length ? shuffle(cands)[0] : null;
+    }
+  }
+  // before the vote opens, drop any item that no longer has a way to be answered
+  if (g.phase === "prompt" || g.phase === "answering") {
+    g.items = (g.items || []).filter((it) => it.answererId || it.humanAnswer != null);
   }
 }
 
 // ---------------------------------------------------------------------------
 // state fan-out: one public payload for the room, one private payload per
-// player (their role, their answer, their vote - never the imposter's identity
-// until the reveal).
+// player (their assignment, their answer, their vote - never who the human
+// behind an answer is until that item's reveal).
 // ---------------------------------------------------------------------------
 
-function actedThisPhase(g, id) {
-  if (g.phase !== "voting") return true; // only the vote shows a per-player status
-  if (id === g.imposterId) return true; // the imposter never votes - blend them in
-  if (!g.players.includes(id)) return true; // spectators aren't voting
-  return g.votes[id] !== undefined;
+// has this player done what the current phase asks of them?
+function acted(r, id) {
+  const g = r.game;
+  if (!g || !g.players.includes(id)) return true;
+  if (g.phase === "prompt") return g.prompts[id] != null;
+  if (g.phase === "answering") {
+    const mine = g.items.filter((it) => it.answererId === id);
+    return mine.every((it) => it.humanAnswer != null);
+  }
+  if (g.phase === "voting") {
+    const it = g.items[g.currentItem];
+    if (!it) return true;
+    if (it.answererId === id) return true; // the answerer sits this vote out
+    return it.votes[id] !== undefined;
+  }
+  return true;
+}
+
+function scoreboardOf(g, members) {
+  return g.players
+    .filter((id) => members[id])
+    .map((id) => ({ id, name: members[id], score: g.scores[id] || 0 }))
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 }
 
 function publicState(roomId, r) {
@@ -483,58 +616,95 @@ function publicState(roomId, r) {
     hasAi: !!anthropic,
     aiCount: n,
     slotCount: n + 1,
+    maxRounds: maxRoundsOf(settings),
     minPlayers: MIN_PLAYERS,
     phase: g ? g.phase : "lobby",
-    round: g ? g.round : 0,
+    gameRound: g ? g.gameRound : 0,
     members: memberIds.map((id) => ({
       id,
       name: members[id],
       isHost: id === meta.hostId,
       isBot: r.bots ? r.bots.has(id) : false,
-      inRound: g ? g.players.includes(id) : false,
-      acted: g ? actedThisPhase(g, id) : false,
+      inGame: g ? g.players.includes(id) : false,
+      acted: g ? acted(r, id) : false,
       score: scores[id] || 0,
     })),
   };
   if (!g) return out;
 
-  out.promptMasterId = g.promptMasterId; // the operator is public knowledge
-  out.stalled = !!g.stalled;
-  out.scoreboard = memberIds
-    .map((id) => ({ id, name: members[id], score: scores[id] || 0 }))
-    .sort((a, b) => b.score - a.score);
+  out.scoreboard = scoreboardOf(g, members);
 
-  if (["answering", "voting", "reveal"].includes(g.phase)) out.prompt = g.prompt;
-  if (g.phase === "answering") out.aiPending = g.aiPending;
-  if (g.phase === "voting") {
-    out.slots = g.slots.map((s) => ({ id: s.id, text: s.text }));
-    out.votesIn = Object.keys(g.votes).length;
-    out.votersTotal = votersOf(g).length;
-  }
-  if (g.phase === "reveal" && g.reveal) {
-    out.slots = g.slots.map((s) => ({ id: s.id, text: s.text, isHuman: s.isHuman }));
-    out.reveal = {
-      humanSlotId: g.reveal.humanSlotId,
-      imposterId: g.reveal.imposterId,
-      tally: g.reveal.tally,
-      votes: g.reveal.votes,
-      caught: g.reveal.caught,
-      fooled: g.reveal.fooled,
-      votersTotal: votersOf(g).length,
-    };
+  if (g.phase === "prompt") {
+    const active = activePlayers(g, members);
+    out.promptsIn = active.filter((id) => g.prompts[id] != null).length;
+    out.playersTotal = active.length;
+  } else if (g.phase === "answering") {
+    out.itemsTotal = g.items.length;
+    out.answersIn = g.items.filter((it) => it.humanAnswer != null).length;
+    out.aiReady = g.items.filter((it) => Array.isArray(it.aiResponses) && !it.aiPending).length;
+  } else if (g.phase === "voting" || g.phase === "reveal") {
+    const it = g.items[g.currentItem];
+    out.itemIndex = g.currentItem;
+    out.itemsTotal = g.items.length;
+    if (it) {
+      out.prompt = it.promptText;
+      if (g.phase === "voting") {
+        out.slots = it.slots.map((s) => ({ id: s.id, text: s.text }));
+        const voters = eligibleVoters(g, it).filter((id) => members[id]);
+        out.votesIn = voters.filter((id) => it.votes[id] !== undefined).length;
+        out.votersTotal = voters.length;
+      } else {
+        const rev = it.reveal;
+        out.slots = it.slots.map((s) => ({ id: s.id, text: s.text, isHuman: s.isHuman }));
+        out.isLastItem = g.currentItem >= g.items.length - 1;
+        out.reveal = {
+          humanSlotId: rev.humanSlotId,
+          answererId: rev.answererId,
+          answererName: members[rev.answererId] || "someone",
+          authorId: rev.authorId,
+          authorName: members[rev.authorId] || "someone",
+          tally: rev.tally,
+          votes: rev.votes,
+          caught: rev.caught,
+          fooled: rev.fooled,
+          voted: rev.voted,
+          votersTotal: rev.votersTotal,
+          impPts: rev.impPts,
+          points: rev.points,
+        };
+      }
+    }
+  } else if (g.phase === "gameover") {
+    out.finalBoard = out.scoreboard;
+    out.winner = out.scoreboard[0] || null;
   }
   return out;
 }
 
 function privateState(r, id) {
   const g = r.game;
-  if (!g || !g.players.includes(id)) return { role: "spectator" };
-  const out = {};
-  out.isPromptMaster = g.promptMasterId === id;
-  out.isImposter = g.imposterId === id;
-  out.role = out.isPromptMaster ? "operator" : out.isImposter ? "imposter" : "voter";
-  if (out.isImposter && g.imposterAnswer != null) out.myAnswer = g.imposterAnswer;
-  if (g.votes[id] !== undefined) out.myVote = g.votes[id];
+  if (!g || !g.players.includes(id)) return { role: "spectator", inGame: false };
+  const out = { role: "player", inGame: true };
+  if (g.phase === "prompt") {
+    out.hasPrompt = g.prompts[id] != null;
+    if (out.hasPrompt) out.myPrompt = g.prompts[id];
+  } else if (g.phase === "answering") {
+    out.assignments = g.items
+      .filter((it) => it.answererId === id)
+      .map((it) => ({
+        itemId: it.id,
+        promptText: it.promptText,
+        answered: it.humanAnswer != null,
+        myAnswer: it.humanAnswer || null,
+      }));
+  } else if (g.phase === "voting" || g.phase === "reveal") {
+    const it = g.items[g.currentItem];
+    if (it) {
+      out.amAnswerer = it.answererId === id;
+      out.wasAuthor = it.authorId === id;
+      if (it.votes[id] !== undefined) out.myVote = it.votes[id];
+    }
+  }
   return out;
 }
 
@@ -638,66 +808,102 @@ io.on("connection", (socket) => {
     broadcast(roomId);
   });
 
-  // operator deals a fresh round: new operator, new secret imposter. works from
-  // the lobby, after a reveal, or to reset a stalled round.
-  socket.on("startRound", withRoom(async (r) => {
+  // host starts a fresh game: everyone is dealt in, everyone writes a prompt.
+  // works from the lobby or after a game is over.
+  socket.on("startGame", withRoom(async (r) => {
     const memberIds = Object.keys(r.members);
-    if (memberIds.length < MIN_PLAYERS) return `need at least ${MIN_PLAYERS} at the table`;
-    const g = newRound(memberIds, r.game);
+    if (memberIds.length < MIN_PLAYERS) return `need at least ${MIN_PLAYERS} on the channel`;
+    const g = newGame(memberIds);
     r.game = g;
-    progress(r); // a bot operator writes the prompt immediately
+    settle(r); // bots write their prompts immediately
     await saveGame(joined.roomId, g);
-    ensureAiKicked(joined.roomId, g, aiCountOf(r.settings));
+    ensureAiKicked(joined.roomId, r.game, aiCountOf(r.settings));
   }, { hostOnly: true }));
 
-  // the operator sends in their prompt; the machine starts writing decoys and
-  // the imposter starts writing their answer.
+  // any player submits their prompt for this game
   socket.on("submitPrompt", withRoom(async (r, { prompt }) => {
     const g = r.game;
     if (!g || g.phase !== "prompt") return "not the moment for a prompt";
-    if (joined.memberId !== g.promptMasterId) return "only the operator writes the prompt";
+    if (!g.players.includes(joined.memberId)) return "you're not in this game";
     const p = cleanText(prompt);
     if (p.length < 3) return "give me a real prompt";
-    g.prompt = p;
-    g.phase = "answering";
-    g.aiPending = true;
-    g.aiResponses = null;
-    progress(r); // a bot imposter answers right away
+    g.prompts[joined.memberId] = p;
+    settle(r); // last prompt in? open the answering phase
     await saveGame(joined.roomId, g);
-    ensureAiKicked(joined.roomId, g, aiCountOf(r.settings));
+    ensureAiKicked(joined.roomId, r.game, aiCountOf(r.settings));
   }));
 
-  // the imposter slips their answer in among the machine's
-  socket.on("submitAnswer", withRoom(async (r, { answer }) => {
+  // any player submits the answer to the prompt they were handed
+  socket.on("submitAnswer", withRoom(async (r, { itemId, answer }) => {
     const g = r.game;
     if (!g || g.phase !== "answering") return "not the moment for an answer";
-    if (joined.memberId !== g.imposterId) return "you're not the imposter this round";
+    const mine = g.items.filter((it) => it.answererId === joined.memberId && it.humanAnswer == null);
+    if (!mine.length) return "nothing left for you to answer";
+    const it = itemId ? mine.find((x) => x.id === itemId) : mine[0];
+    if (!it) return "that prompt isn't yours to answer";
     const a = cleanText(answer);
     if (a.length < 3) return "write a real answer";
-    g.imposterAnswer = a;
-    progress(r);
+    it.humanAnswer = a;
+    settle(r);
     await saveGame(joined.roomId, g);
   }));
 
   socket.on("vote", withRoom(async (r, { slotId }) => {
     const g = r.game;
     if (!g || g.phase !== "voting") return "the vote isn't open";
+    const it = g.items[g.currentItem];
+    if (!it || !it.slots) return "the vote isn't open";
     const me = joined.memberId;
-    if (!g.players.includes(me)) return "you're not in this round";
-    if (me === g.imposterId) return "the imposter doesn't vote";
-    if (!g.slots.some((s) => s.id === slotId)) return "pick one of the answers";
-    g.votes[me] = slotId;
-    progress(r);
+    if (!g.players.includes(me)) return "you're not in this game";
+    if (me === it.answererId) return "you wrote this answer - you can't vote on it";
+    if (!it.slots.some((s) => s.id === slotId)) return "pick one of the answers";
+    it.votes[me] = slotId;
+    settle(r);
     await saveGame(joined.roomId, g);
   }));
 
-  // operator closes the vote early - whoever hasn't voted simply doesn't count
-  socket.on("closeVoting", withRoom(async (r) => {
+  // host force-advances the current phase (skip stragglers / move on):
+  //   prompt    -> close prompts early and deal answers
+  //   answering -> open the vote with whatever's ready
+  //   voting    -> close this vote now
+  //   reveal    -> move to the next prompt (or the final board)
+  socket.on("advance", withRoom(async (r) => {
     const g = r.game;
-    if (!g || g.phase !== "voting") return "the vote isn't open";
-    if (Object.keys(g.votes).length === 0) return "nobody has voted yet";
-    closeVoting(g);
-    await saveGame(joined.roomId, g);
+    if (!g) return "no game running";
+    if (g.phase === "prompt") {
+      if (!Object.keys(g.prompts).length) return "nobody has written a prompt yet";
+      startAnswering(r);
+      settle(r);
+      await saveGame(joined.roomId, g);
+      ensureAiKicked(joined.roomId, r.game, aiCountOf(r.settings));
+      return;
+    }
+    if (g.phase === "answering") {
+      const ready = g.items.filter(itemReady);
+      if (!ready.length) return "no prompts are ready yet - give it a moment";
+      g.items = ready;
+      for (const it of g.items) buildSlots(it);
+      g.currentItem = 0;
+      g.phase = "voting";
+      settle(r);
+      await saveGame(joined.roomId, g);
+      return;
+    }
+    if (g.phase === "voting") {
+      const it = g.items[g.currentItem];
+      if (!it || !it.slots) return "the vote isn't open";
+      if (!Object.keys(it.votes).length) return "nobody has voted yet";
+      closeItemVoting(g, it);
+      await saveGame(joined.roomId, g);
+      return;
+    }
+    if (g.phase === "reveal") {
+      advanceItem(g);
+      settle(r);
+      await saveGame(joined.roomId, g);
+      return;
+    }
+    return "nothing to advance";
   }, { hostOnly: true }));
 
   socket.on("addBots", withRoom(async (r, { count }) => {
@@ -719,11 +925,11 @@ io.on("connection", (socket) => {
 
   socket.on("leave", withRoom(async (r) => {
     const me = joined.memberId;
-    if (me === r.meta.hostId) return "the operator can't leave their own table";
+    if (me === r.meta.hostId) return "the host can't leave their own channel";
     if (r.game) removeFromRound(r.game, me);
     await redis.hdel(keys.members(joined.roomId), me);
     if (r.game) {
-      progress(r);
+      settle(r);
       await saveGame(joined.roomId, r.game);
     }
   }));
@@ -735,7 +941,7 @@ io.on("connection", (socket) => {
     await redis.hdel(keys.members(joined.roomId), memberId);
     await redis.srem(keys.bots(joined.roomId), memberId);
     if (r.game) {
-      progress(r);
+      settle(r);
       await saveGame(joined.roomId, r.game);
     }
     io.to(`${joined.roomId}:m:${memberId}`).emit("kicked");
@@ -744,6 +950,7 @@ io.on("connection", (socket) => {
   socket.on("settings", withRoom(async (r, { settings }) => {
     const clean = {};
     if (settings?.aiCount !== undefined) clean.aiCount = aiCountOf(settings);
+    if (settings?.maxRounds !== undefined) clean.maxRounds = maxRoundsOf(settings);
     const merged = { ...r.settings, ...clean };
     await redis.hset(keys.meta(joined.roomId), "settings", JSON.stringify(merged));
   }, { hostOnly: true }));

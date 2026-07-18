@@ -1,22 +1,22 @@
 # wetware
 
-A party game where one of you pretends to be an AI. The **operator** sends a prompt to the machine and gets back a line-up of answers - all but one written by Claude. The odd one out is the **imposter**: a human, the *wetware*, trying to pass as software. Everyone else reads the answers and votes on which one still has a pulse.
+A party game where everyone takes a turn pretending to be an AI. Each of you writes a prompt for the machine; then each of you is handed *someone else's* prompt and has to answer it convincingly enough to pass as software. Every prompt's line-up is one human answer - the *wetware* - shuffled in among answers written by Claude. The table votes, prompt by prompt, on which answer still has a pulse.
 
-Dressed up as a possessed 1992 arcade cabinet (heavy CRT, scanlines, red/blue glitch) but plays like a phone-friendly party game: open a channel, share the link, play across the room.
+Everybody types at once, so nobody just watches. Dressed up as a possessed 1992 arcade cabinet (heavy CRT, scanlines, red/blue glitch) but plays like a phone-friendly party game: open a channel, share the link, play across the room.
 
-## A round
+## A game
 
-1. **Roles.** Each round the app secretly picks one **operator** (public - they write the prompt) and one **imposter** (secret - the human hiding among the machines). Everyone else are **detectives**. Roles rotate every round.
-2. **The prompt.** The operator asks the machine a question - ideally one an imposter can't easily fake.
-3. **The answers.** The machine (Claude) writes several answers to the prompt. At the same time, the imposter writes one answer of their own, trying to blend in. Every answer - human and machine - is held to **at most 3 sentences** so length can't give the human away. They're shuffled into a lettered line-up.
-4. **The vote.** Every detective reads the line-up and votes for the answer they think a human wrote. The imposter sits it out.
-5. **The reveal.** The human answer is unmasked, the imposter is named, and the votes are tallied. Detectives who caught the imposter score a point each; the imposter scores a point for everyone they fooled. Running scores carry across rounds.
+1. **Prompts (everyone at once).** Every player writes one prompt for the machine. With a small table every prompt gets played; a big table caps how many go to a vote (`max prompts voted per game`, default 8).
+2. **Answers (everyone at once).** Each player is handed one prompt that *isn't theirs* and answers it as if they were the AI. Behind the scenes, Claude writes decoy answers for every prompt. Every answer - human and machine - is held to **at most 3 sentences** so length can't give the human away.
+3. **The vote (one prompt at a time).** For each prompt, the shuffled line-up goes up and the whole table - except the person who wrote the human answer - votes for the one they think a human wrote.
+4. **The reveal.** The human answer is unmasked and the votes are tallied. **Scoring, imposter-Jackbox style:** every detective who catches the human banks a flat **+100**; the human banks up to **+100** scaled by the share of voters they slipped past - full marks if nobody spots them, nothing if everyone does.
+5. **Final board.** After the last prompt, the leaderboard crowns whoever fooled and caught the most. Play again to reset.
 
 3+ players. Channels expire after 24h idle.
 
 ## The machine
 
-With an `ANTHROPIC_API_KEY` set, the decoy answers are written live by Claude (`claude-opus-4-8` by default) from the operator's prompt, capped at 3 sentences each. Without a key, the game falls back to a canned pool of generic AI-sounding lines so it still runs offline (they won't match the prompt, so it's easier - handy for local testing).
+With an `ANTHROPIC_API_KEY` set, the decoy answers are written live by Claude (`claude-opus-4-8` by default) from each prompt, capped at 3 sentences each. Without a key, the game falls back to a canned pool of generic AI-sounding lines so it still runs offline (they won't match the prompt, so it's easier - handy for local testing).
 
 ## Run
 
@@ -52,7 +52,8 @@ Point `REDIS_URL` at a shared Redis (any non-localhost host) and run as many rep
 
 ## Setup (host settings)
 
-- **machine answers per round** (2-6, default 4). The imposter's answer is shuffled in among these, so 3-7 answers go up for the vote.
+- **machine answers per prompt** (2-6, default 4). The human's answer is shuffled in among these, so 3-7 answers go up for each vote.
+- **max prompts voted per game** (1-12, default 8). Everyone always writes a prompt and an answer; with a big table only this many prompts go to a vote so a game doesn't drag.
 
 ## Test games (solo)
 
@@ -61,6 +62,6 @@ There's a hidden back room for trying the app out alone. It's not shown anywhere
 Test tables:
 
 - get a `TEST-XXXX` code and live in their own Redis namespace (`testroom:*`), so they never collide with or show up alongside real channels.
-- let the host seat **auto-playing bots** ("add bots" in the lobby). A bot operator writes a canned prompt, a bot imposter writes a canned answer, and bot detectives vote at random - so one person can run a whole game start to finish, no second device needed.
+- let the host seat **auto-playing bots** ("add bots" in the lobby). Bots write canned prompts, answer their assigned prompt with a canned line, and vote at random - so one person can run a whole game start to finish (the host still clicks through the reveals), no second device needed.
 
 Set `TEST_PIN` to change the pin, or `TEST_PIN=""` to disable test tables entirely.

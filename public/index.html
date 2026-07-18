@@ -88,10 +88,15 @@
             <button class="modal-close" data-close aria-label="close">✕</button>
           </div>
           <label class="field">
-            <span>machine answers per round</span>
+            <span>machine answers per prompt</span>
             <input id="setAiCount" type="number" min="2" max="6" value="4" inputmode="numeric" />
           </label>
-          <p class="muted small">the imposter's answer is shuffled in among these, so <b id="setSlotHint">5</b> answers go up for the vote. changes apply at the next round.</p>
+          <p class="muted small">the human's answer is shuffled in among these, so <b id="setSlotHint">5</b> answers go up for each vote.</p>
+          <label class="field">
+            <span>max prompts voted per game</span>
+            <input id="setMaxRounds" type="number" min="1" max="12" value="8" inputmode="numeric" />
+          </label>
+          <p class="muted small">everyone writes a prompt and an answer; with a big table only this many prompts go to a vote. changes apply at the next game.</p>
           <p class="muted small" id="aiModeNote"></p>
           <button class="btn btn-secondary modal-done" data-close>done</button>
         </div>
@@ -105,9 +110,8 @@
       <p id="connNote" class="conn-note hidden">◌ signal lost — reconnecting…</p>
 
       <p id="roleNote" class="role-note hidden"></p>
-      <p id="stalledNote" class="stalled-note hidden">someone essential dropped out mid-round. the operator can boot a fresh one.</p>
 
-      <!-- ─── waiting for the round ─── -->
+      <!-- ─── waiting for the game ─── -->
       <div id="stageLobby" class="stage hidden">
         <p class="stage-lead" id="lobbyHint"></p>
         <div class="bot-row hidden" id="botRow">
@@ -117,28 +121,35 @@
           <button id="addBotsBtn" class="btn btn-secondary">add bots</button>
         </div>
         <div class="host-actions hidden" id="startRow">
-          <button id="startBtn" class="btn btn-accent btn-big">▶ start the round</button>
+          <button id="startBtn" class="btn btn-accent btn-big">▶ boot the game</button>
         </div>
       </div>
 
-      <!-- ─── the operator writes a prompt ─── -->
+      <!-- ─── everyone writes a prompt ─── -->
       <div id="stagePrompt" class="stage hidden">
-        <h2 class="stage-head">the prompt</h2>
-        <p class="stage-lead" id="promptLead"></p>
+        <h2 class="stage-head">write a prompt</h2>
+        <p class="stage-lead" id="promptLead">everyone writes one prompt for the machine. later, someone else will have to answer yours while pretending to be an AI.</p>
         <div id="promptCompose" class="compose hidden">
           <textarea id="promptInput" maxlength="240" rows="3" placeholder="ask the machine anything…"></textarea>
           <div class="compose-foot">
             <span class="ch-count"><span id="promptCount">0</span>/240</span>
-            <button id="promptSend" class="btn btn-accent">▶ transmit to the machine</button>
+            <button id="promptSend" class="btn btn-accent">▶ transmit</button>
           </div>
+        </div>
+        <div id="promptDone" class="done-note hidden">prompt transmitted. waiting on the rest of the channel…</div>
+        <div id="promptProgress" class="spinner-row hidden">
+          <span class="cursor-blink">▋</span> <span id="promptProgressText"></span>
+        </div>
+        <div class="host-actions hidden" id="promptSkipRow">
+          <button id="promptSkipBtn" class="btn btn-secondary">skip stragglers → deal the answers</button>
         </div>
       </div>
 
-      <!-- ─── answers incoming ─── -->
+      <!-- ─── everyone answers an assigned prompt ─── -->
       <div id="stageAnswering" class="stage hidden">
-        <div class="prompt-quote" id="answeringPrompt"></div>
-        <h2 class="stage-head" id="answeringHead">answers incoming</h2>
-        <p class="stage-lead" id="answeringLead"></p>
+        <h2 class="stage-head" id="answeringHead">answer as the machine</h2>
+        <p class="stage-lead" id="answeringLead">you've been handed someone else's prompt. answer it so convincingly that nobody guesses a human wrote it.</p>
+        <div id="assignmentBox"></div>
         <div id="answerCompose" class="compose hidden">
           <textarea id="answerInput" maxlength="200" rows="3" placeholder="answer like a machine would… (max 3 sentences)"></textarea>
           <div class="compose-foot">
@@ -146,14 +157,18 @@
             <button id="answerSend" class="btn btn-accent">▶ plant your answer</button>
           </div>
         </div>
-        <div id="answerDone" class="done-note hidden">your answer is planted. now hide in the crowd.</div>
+        <div id="answerDone" class="done-note hidden">answer planted. now hide in the crowd.</div>
         <div id="answeringSpinner" class="spinner-row hidden">
-          <span class="cursor-blink">▋</span> <span id="answeringSpinnerText">the machine is composing…</span>
+          <span class="cursor-blink">▋</span> <span id="answeringSpinnerText">the machine is composing the decoys…</span>
+        </div>
+        <div class="host-actions hidden" id="answerSkipRow">
+          <button id="answerSkipBtn" class="btn btn-secondary">skip stragglers → open the vote</button>
         </div>
       </div>
 
       <!-- ─── the vote ─── -->
       <div id="stageVoting" class="stage hidden">
+        <p class="round-chip" id="votingChip"></p>
         <div class="prompt-quote" id="votingPrompt"></div>
         <h2 class="stage-head">spot the human</h2>
         <p class="stage-lead" id="votingLead"></p>
@@ -166,13 +181,24 @@
 
       <!-- ─── the reveal ─── -->
       <div id="stageReveal" class="stage hidden">
+        <p class="round-chip" id="revealChip"></p>
         <div class="prompt-quote" id="revealPrompt"></div>
         <h2 class="stage-head" id="revealHead">the reveal</h2>
         <p class="stage-lead" id="revealLead"></p>
         <div id="revealList" class="slot-list reveal-list"></div>
         <div id="scoreboard" class="scoreboard"></div>
         <div class="host-actions hidden" id="nextRow">
-          <button id="nextBtn" class="btn btn-accent btn-big">▶ next round</button>
+          <button id="nextBtn" class="btn btn-accent btn-big">▶ next prompt</button>
+        </div>
+      </div>
+
+      <!-- ─── final results ─── -->
+      <div id="stageGameover" class="stage hidden">
+        <h2 class="stage-head glitch" data-text="game over">game over</h2>
+        <p class="stage-lead" id="gameoverLead"></p>
+        <div id="finalBoard" class="scoreboard final-board"></div>
+        <div class="host-actions hidden" id="againRow">
+          <button id="againBtn" class="btn btn-accent btn-big">▶ play again</button>
         </div>
       </div>
 

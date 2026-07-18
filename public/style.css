@@ -342,3 +342,28 @@ textarea { resize: vertical; line-height: 1.5; }
 .heart { color: var(--color-pony); }
 .signature { color: var(--color-cyan); text-decoration: none; }
 .signature:hover { color: var(--color-green); }
+
+/* ── new-flow bits: round chip, answer assignment, final board ── */
+.pill[data-phase="prompt"] { color: var(--color-cyan); border-color: var(--color-cyan); }
+.pill[data-phase="gameover"] { color: var(--color-pony); border-color: var(--color-pony); }
+
+.round-chip { display: inline-block; font-family: var(--font-pixel); font-size: 0.85rem;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--color-muted);
+  border: 1px solid var(--color-edge-2); border-radius: var(--radius-sm);
+  padding: 0.15em 0.6em; margin-bottom: var(--space-sm); }
+
+#assignmentBox { margin-bottom: var(--space-md); }
+.assignment { border: 2px solid var(--color-pony); border-radius: var(--radius-sm);
+  padding: var(--space-sm) var(--space-md); margin-bottom: var(--space-sm);
+  background: oklch(from var(--color-pony) 18% 0.08 h / 0.14); }
+.assignment.answered { border-color: var(--color-edge-2); background: var(--color-black); }
+.assignment .prompt-quote { margin-bottom: 0; }
+.assignment-tag { font-family: var(--font-pixel); font-size: 0.85rem; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--color-pony-bright); margin-bottom: var(--space-xs); }
+.assignment.answered .assignment-tag { color: var(--color-ok); }
+.assignment-answer { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--color-fg);
+  margin-top: var(--space-sm); font-style: italic; }
+
+.final-board { border-top: none; }
+.final-board .score-row { font-size: var(--text-md); padding: var(--space-sm); }
+#stageGameover .stage-head { color: var(--color-pony); text-shadow: 0 0 14px oklch(70% 0.2 350 / 0.4); }
