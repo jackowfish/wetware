@@ -4,214 +4,136 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="WETWARE" />
-  <meta name="theme-color" content="#05060a" />
-  <title>WETWARE</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%91%81%3C/text%3E%3C/svg%3E" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Messages" />
+  <meta name="theme-color" content="#f8f8f8" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#161617" media="(prefers-color-scheme: dark)" />
+  <title>Messages — WETWARE</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%92%AC%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/tokens.css" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <!-- power-on self test - plays once per visit, like a possessed BIOS booting -->
-  <div id="bios" class="bios" aria-hidden="true">
-    <div class="bios-screen">
-      <p class="bios-head glitch" data-text="WETWARE BIOS v6.66">WETWARE BIOS v6.66</p>
-      <p class="bios-sub">(C) 1992 WETWARE CORP. — all souls reserved</p>
-      <ul class="bios-lines">
-        <li><span class="lbl">Detecting wetware</span><span class="lead"></span><b>1 UNIT</b></li>
-        <li><span class="lbl">Memory test</span><span class="lead"></span><b class="ok"><span id="biosMem">000000</span>K OK</b></li>
-        <li><span class="lbl">Initializing neural bus</span><span class="lead"></span><b class="ok">OK</b></li>
-        <li><span class="lbl">Mounting SOUL.SYS</span><span class="lead"></span><b class="ok">OK</b></li>
-        <li><span class="lbl">Scanning for imposters</span><span class="lead"></span><b class="warn">1 FOUND</b></li>
-        <li class="boot"><span class="lbl">BOOTING WETWARE</span><span class="dots"></span></li>
-      </ul>
-    </div>
-  </div>
-
-  <!-- the whole thing is one possessed CRT: scanlines, vignette, flicker, a rolling scan bar -->
-  <div class="crt" aria-hidden="true">
-    <div class="crt-vignette"></div>
-    <div class="crt-scanlines"></div>
-    <div class="crt-scanbar"></div>
-  </div>
-
   <main id="app">
-    <!-- ═══════════ lobby ═══════════ -->
-    <section id="lobby" class="card">
-      <p class="est">▚ WETWARE CORP. · © 1992 · INSERT SOUL ▚</p>
-      <h1 class="title glitch" data-text="WETWARE">WETWARE</h1>
-      <p class="tagline" id="lobbyTagline">a line-up of machine answers. one of them still has a pulse. find it.</p>
-      <p class="join-banner hidden" id="joinBanner">
-        › patching into channel <code id="joinBannerCode"></code>
-      </p>
 
-      <label class="field">
-        <span>handle</span>
-        <input id="name" placeholder="player_1" maxlength="40" autocomplete="off" />
-      </label>
+    <!-- ═══════════ Messages home / new conversation ═══════════ -->
+    <section id="lobby" class="screen lobby">
+      <div class="lobby-inner">
+        <div class="app-badge" aria-hidden="true">💬</div>
+        <h1 class="lobby-title">WETWARE</h1>
+        <p class="lobby-tagline" id="lobbyTagline">A group text where one reply still has a pulse. Find it.</p>
+        <p class="join-banner hidden" id="joinBanner">
+          Joining conversation <b id="joinBannerCode"></b>
+        </p>
 
-      <div class="row">
-        <input id="joinCode" placeholder="CHANNEL CODE" maxlength="12" class="code-input" autocomplete="off" />
-        <button id="join" class="btn btn-secondary">jack in</button>
+        <div class="compose-card">
+          <div class="field-row">
+            <span class="field-label">Name</span>
+            <input id="name" placeholder="Your name" maxlength="40" autocomplete="off" />
+          </div>
+          <div class="field-row">
+            <span class="field-label">To:</span>
+            <input id="joinCode" placeholder="Conversation code" maxlength="12" class="code-input" autocomplete="off" />
+          </div>
+        </div>
+
+        <button id="join" class="cta cta-secondary">Join conversation</button>
+        <div class="divider"><span>or</span></div>
+        <button id="create" class="cta cta-primary">Start a new conversation</button>
+
+        <p id="lobbyErr" class="err" role="alert"></p>
       </div>
-      <div class="divider"><span>or</span></div>
-      <button id="create" class="btn btn-primary btn-big">▶ boot a new channel</button>
-
-      <p id="lobbyErr" class="err" role="alert"></p>
     </section>
 
-    <!-- ═══════════ room ═══════════ -->
-    <section id="room" class="card hidden">
-      <header class="room-header">
-        <div class="room-code-box">
-          <span class="label">channel</span>
-          <code id="roomId">----</code>
-          <button id="copyLink" class="link">copy link</button>
-        </div>
-        <div class="right">
-          <span id="youAre" class="muted"></span>
-          <button id="renameBtn" class="link hidden">✎ handle</button>
-          <button id="settingsBtn" class="link hidden">⚙ setup</button>
-          <button id="leaveBtn" class="link">⏻ eject</button>
+    <!-- ═══════════ conversation thread ═══════════ -->
+    <section id="room" class="screen convo hidden">
+
+      <!-- translucent nav bar -->
+      <header class="nav">
+        <button id="leaveBtn" class="nav-back" aria-label="back to Messages">
+          <svg viewBox="0 0 12 20" width="12" height="20" aria-hidden="true"><path d="M10.5 1.5 2 10l8.5 8.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="nav-back-label">Messages</span>
+        </button>
+        <button class="nav-title" id="navTitle" aria-label="conversation details">
+          <span class="nav-avatar" id="navAvatar" aria-hidden="true">💬</span>
+          <span class="nav-name" id="roomName">WETWARE</span>
+          <span class="nav-sub" id="roomSub">tap for info</span>
+        </button>
+        <div class="nav-actions">
+          <button id="settingsBtn" class="nav-icon hidden" aria-label="setup">
+            <svg viewBox="0 0 22 22" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 7h11M18 7h1M3 15h1M8 15h11"/><circle cx="16" cy="7" r="2.1" fill="var(--bg-nav)"/><circle cx="6" cy="15" r="2.1" fill="var(--bg-nav)"/></svg>
+          </button>
         </div>
       </header>
 
-      <div id="settingsModal" class="modal hidden" aria-hidden="true">
-        <div class="modal-backdrop" data-close></div>
-        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
-          <div class="modal-head">
-            <h3 id="settingsTitle">setup</h3>
-            <button class="modal-close" data-close aria-label="close">✕</button>
+      <p id="connNote" class="conn-note hidden">Waiting for network…</p>
+
+      <!-- the message thread -->
+      <div class="thread" id="thread" aria-live="polite"></div>
+
+      <!-- docked host actions + compose pill -->
+      <footer class="dock" id="dock">
+        <div id="actionBar" class="action-bar hidden"></div>
+        <div id="composer" class="composer hidden">
+          <div class="composer-pill">
+            <textarea id="composeInput" rows="1" maxlength="240" placeholder="iMessage"></textarea>
+            <button id="composeSend" class="send-btn" aria-label="send" disabled>
+              <svg viewBox="0 0 22 22" width="22" height="22" aria-hidden="true"><path d="M11 16.5V6M6.5 10.5 11 6l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
           </div>
-          <label class="field">
-            <span>machine answers per prompt</span>
+          <div class="composer-meta">
+            <span id="composeHint"></span>
+            <span id="composeCount" class="ch-count"></span>
+          </div>
+        </div>
+      </footer>
+
+      <!-- details / participants sheet -->
+      <div id="detailsSheet" class="sheet hidden" aria-hidden="true">
+        <div class="sheet-backdrop" data-close></div>
+        <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="detailsTitle">
+          <div class="sheet-grip" data-close></div>
+          <div class="sheet-head">
+            <h3 id="detailsTitle">Details</h3>
+            <button class="sheet-close" data-close aria-label="close">Done</button>
+          </div>
+          <div class="detail-code">
+            <span class="detail-code-label">Conversation code</span>
+            <div class="detail-code-row">
+              <code id="detailCode">----</code>
+              <button id="copyLink" class="pill-btn">Copy link</button>
+            </div>
+          </div>
+          <h4 class="detail-subhead"><span id="detailCount">0</span> people</h4>
+          <ul id="members" class="members"></ul>
+        </div>
+      </div>
+
+      <!-- setup sheet -->
+      <div id="settingsModal" class="sheet hidden" aria-hidden="true">
+        <div class="sheet-backdrop" data-close></div>
+        <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+          <div class="sheet-grip" data-close></div>
+          <div class="sheet-head">
+            <h3 id="settingsTitle">Setup</h3>
+            <button class="sheet-close" data-close aria-label="close">Done</button>
+          </div>
+          <div class="field-row sheet-field">
+            <span class="field-label">Machine replies per prompt</span>
             <input id="setAiCount" type="number" min="2" max="6" value="4" inputmode="numeric" />
-          </label>
-          <p class="muted small">the human's answer is shuffled in among these, so <b id="setSlotHint">5</b> answers go up for each vote.</p>
-          <label class="field">
-            <span>max prompts voted per game</span>
+          </div>
+          <p class="sheet-note">The human reply is mixed in, so <b id="setSlotHint">5</b> texts go up for each vote.</p>
+          <div class="field-row sheet-field">
+            <span class="field-label">Max prompts voted per game</span>
             <input id="setMaxRounds" type="number" min="1" max="12" value="8" inputmode="numeric" />
-          </label>
-          <p class="muted small">everyone writes a prompt and an answer; with a big table only this many prompts go to a vote. changes apply at the next game.</p>
-          <p class="muted small" id="aiModeNote"></p>
-          <button class="btn btn-secondary modal-done" data-close>done</button>
-        </div>
-      </div>
-
-      <div class="phase-row">
-        <span id="phaseLabel" class="pill">gathering</span>
-        <span id="waitLabel" class="counts"></span>
-      </div>
-
-      <p id="connNote" class="conn-note hidden">◌ signal lost — reconnecting…</p>
-
-      <p id="roleNote" class="role-note hidden"></p>
-
-      <!-- ─── waiting for the game ─── -->
-      <div id="stageLobby" class="stage hidden">
-        <p class="stage-lead" id="lobbyHint"></p>
-        <div class="bot-row hidden" id="botRow">
-          <span class="bot-row-label">🧪 test players</span>
-          <input id="botCount" class="bot-count" type="number" min="1" max="12" value="4"
-                 inputmode="numeric" aria-label="how many test players to add" />
-          <button id="addBotsBtn" class="btn btn-secondary">add bots</button>
-        </div>
-        <div class="host-actions hidden" id="startRow">
-          <button id="startBtn" class="btn btn-accent btn-big">▶ boot the game</button>
-        </div>
-      </div>
-
-      <!-- ─── everyone writes a prompt ─── -->
-      <div id="stagePrompt" class="stage hidden">
-        <h2 class="stage-head">write a prompt</h2>
-        <p class="stage-lead" id="promptLead">everyone writes one prompt for the machine. later, someone else will have to answer yours while pretending to be an AI.</p>
-        <div id="promptCompose" class="compose hidden">
-          <textarea id="promptInput" maxlength="240" rows="3" placeholder="ask the machine anything…"></textarea>
-          <div class="compose-foot">
-            <span class="ch-count"><span id="promptCount">0</span>/240</span>
-            <button id="promptSend" class="btn btn-accent">▶ transmit</button>
           </div>
-        </div>
-        <div id="promptDone" class="done-note hidden">prompt transmitted. waiting on the rest of the channel…</div>
-        <div id="promptProgress" class="spinner-row hidden">
-          <span class="cursor-blink">▋</span> <span id="promptProgressText"></span>
-        </div>
-        <div class="host-actions hidden" id="promptSkipRow">
-          <button id="promptSkipBtn" class="btn btn-secondary">skip stragglers → deal the answers</button>
+          <p class="sheet-note">Everyone always writes a prompt and a reply; with a big group only this many go to a vote. Applies next game.</p>
+          <p class="sheet-note" id="aiModeNote"></p>
         </div>
       </div>
 
-      <!-- ─── everyone answers an assigned prompt ─── -->
-      <div id="stageAnswering" class="stage hidden">
-        <h2 class="stage-head" id="answeringHead">answer as the machine</h2>
-        <p class="stage-lead" id="answeringLead">you've been handed someone else's prompt. answer it so convincingly that nobody guesses a human wrote it.</p>
-        <div id="assignmentBox"></div>
-        <div id="answerCompose" class="compose hidden">
-          <textarea id="answerInput" maxlength="200" rows="3" placeholder="answer like a machine would… (max 3 sentences)"></textarea>
-          <div class="compose-foot">
-            <span class="ch-count"><span id="answerCount">0</span>/200</span>
-            <button id="answerSend" class="btn btn-accent">▶ plant your answer</button>
-          </div>
-        </div>
-        <div id="answerDone" class="done-note hidden">answer planted. now hide in the crowd.</div>
-        <div id="answeringSpinner" class="spinner-row hidden">
-          <span class="cursor-blink">▋</span> <span id="answeringSpinnerText">the machine is composing the decoys…</span>
-        </div>
-        <div class="host-actions hidden" id="answerSkipRow">
-          <button id="answerSkipBtn" class="btn btn-secondary">skip stragglers → open the vote</button>
-        </div>
-      </div>
-
-      <!-- ─── the vote ─── -->
-      <div id="stageVoting" class="stage hidden">
-        <p class="round-chip" id="votingChip"></p>
-        <div class="prompt-quote" id="votingPrompt"></div>
-        <h2 class="stage-head">spot the human</h2>
-        <p class="stage-lead" id="votingLead"></p>
-        <div id="slotList" class="slot-list"></div>
-        <p id="voteDone" class="done-note hidden">your vote is locked in.</p>
-        <div class="host-actions hidden" id="closeVoteRow">
-          <button id="closeVoteBtn" class="btn btn-accent btn-big">close the vote</button>
-        </div>
-      </div>
-
-      <!-- ─── the reveal ─── -->
-      <div id="stageReveal" class="stage hidden">
-        <p class="round-chip" id="revealChip"></p>
-        <div class="prompt-quote" id="revealPrompt"></div>
-        <h2 class="stage-head" id="revealHead">the reveal</h2>
-        <p class="stage-lead" id="revealLead"></p>
-        <div id="revealList" class="slot-list reveal-list"></div>
-        <div id="scoreboard" class="scoreboard"></div>
-        <div class="host-actions hidden" id="nextRow">
-          <button id="nextBtn" class="btn btn-accent btn-big">▶ next prompt</button>
-        </div>
-      </div>
-
-      <!-- ─── final results ─── -->
-      <div id="stageGameover" class="stage hidden">
-        <h2 class="stage-head glitch" data-text="game over">game over</h2>
-        <p class="stage-lead" id="gameoverLead"></p>
-        <div id="finalBoard" class="scoreboard final-board"></div>
-        <div class="host-actions hidden" id="againRow">
-          <button id="againBtn" class="btn btn-accent btn-big">▶ play again</button>
-        </div>
-      </div>
-
-      <!-- who's on the channel -->
-      <ul id="members" class="members"></ul>
     </section>
   </main>
-
-  <footer class="site-footer">
-    <span class="credit">
-      Made with <span class="heart" aria-hidden="true">♥</span> by <a href="https://github.com/jackowfish" class="signature" rel="noopener noreferrer">Jack Decker</a>
-    </span>
-  </footer>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/app.js"></script>

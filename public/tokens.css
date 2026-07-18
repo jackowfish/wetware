@@ -1,63 +1,57 @@
-/* Hallmark · component: game-app · genre: retro-horror-arcade · theme: custom
- * vibe: "a possessed 1992 arcade cabinet runs a Turing test as a party game"
- * ref: Pony Island - curved CRT, heavy scanlines, red/blue de-calibration,
- *      electric-blue corrupted menu, demonic red accents, cute-pony pink
- * screen: oklch(13% 0.02 250) · primary: oklch(72% 0.15 232) electric cyan
- * hellfire: oklch(60% 0.23 25) red · phosphor: oklch(82% 0.19 150) green
- * pony: oklch(74% 0.20 350) pink (the human hides as the pony)
- * fonts: Press Start 2P (wordmark) + VT323 (headings) + IBM Plex Mono (body)
- * axes: dark / pixel-arcade / cool-with-hot-accents
- * states: default · hover · focus · active · disabled · loading · error · success
- * pre-emit critique: P5 H4 E4 S5 R4 V6
+/* Hallmark · component: game-app · genre: chat / messaging · theme: iMessage
+ * vibe: "a party game that lives entirely inside a texting thread"
+ * ref: iOS Messages (iMessage) - blue outgoing bubbles, gray incoming bubbles
+ *      with tails, translucent nav bar, rounded compose pill, blue send arrow,
+ *      Delivered/Read receipts, tapback reactions, three-dot typing bubble.
+ * fonts: San Francisco (-apple-system) with Helvetica Neue / Segoe fallback
+ * axes: light-default / soft-neutral surfaces / one saturated accent (iOS blue)
+ * states: default · hover · focus · active · disabled · loading · sent · read
  */
 
 :root {
-  /* the screen */
-  --color-black: oklch(9% 0.012 255);
-  --color-screen: oklch(13% 0.02 252);
-  --color-screen-2: oklch(17% 0.026 250);
-  --color-panel: oklch(20% 0.03 248);
-  --color-edge: oklch(38% 0.06 240);
-  --color-edge-2: oklch(50% 0.09 232);
+  color-scheme: light dark;
 
-  /* electric blue - the corrupted OS */
-  --color-cyan: oklch(74% 0.15 232);
-  --color-cyan-bright: oklch(86% 0.16 220);
-  --color-cyan-dim: oklch(52% 0.11 235);
+  /* iOS system accents */
+  --imsg-blue: #0a84ff;          /* outgoing iMessage bubble / send button */
+  --imsg-blue-2: #0060df;        /* bubble gradient bottom */
+  --imsg-blue-tint: #007aff;     /* links, active controls */
+  --imsg-green: #34c759;         /* SMS / "human caught" accent */
+  --imsg-green-2: #248a3d;
+  --imsg-red: #ff3b30;           /* destructive / errors */
+  --imsg-amber: #ff9f0a;
+  --imsg-purple: #af52de;
 
-  /* hellfire red - Lucifer, glitches, alerts */
-  --color-red: oklch(62% 0.23 25);
-  --color-red-bright: oklch(72% 0.24 28);
+  /* light surfaces (default) */
+  --bg-app: #ffffff;             /* thread background */
+  --bg-nav: rgba(248,248,248,0.82); /* translucent nav + dock */
+  --bg-elev: #ffffff;            /* cards, sheets */
+  --bubble-in: #e9e9eb;          /* incoming gray bubble */
+  --bubble-in-text: #000000;
+  --bubble-out-text: #ffffff;
+  --field-bg: #ffffff;           /* compose field */
+  --field-border: #d1d1d6;
+  --hairline: rgba(60,60,67,0.16);
+  --hairline-strong: rgba(60,60,67,0.29);
 
-  /* phosphor green - the machine / success */
-  --color-green: oklch(84% 0.2 150);
-  --color-green-dim: oklch(64% 0.15 152);
+  --text: #000000;
+  --text-2: #3c3c43;             /* secondary label */
+  --text-muted: #8e8e93;         /* tertiary / timestamps / receipts */
+  --text-faint: #aeaeb2;
 
-  /* pony pink - the human hides here */
-  --color-pony: oklch(76% 0.2 350);
-  --color-pony-bright: oklch(84% 0.19 352);
+  /* avatar palette (assigned by name hash) */
+  --av-1: #ff375f; --av-2: #ff9500; --av-3: #ffcc00; --av-4: #34c759;
+  --av-5: #00c7be; --av-6: #30b0c7; --av-7: #007aff; --av-8: #5856d6;
+  --av-9: #af52de; --av-10: #ff2d55;
 
-  --color-amber: oklch(82% 0.15 78);
+  /* type — SF / system UI stack */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Helvetica Neue", "Segoe UI", Roboto, system-ui, sans-serif;
 
-  /* text */
-  --color-text: oklch(91% 0.03 225);
-  --color-muted: oklch(64% 0.04 235);
-  --color-focus: oklch(86% 0.16 210);
-  --color-ok: var(--color-green);
-  --color-err: var(--color-red-bright);
-
-  /* type */
-  --font-arcade: "Press Start 2P", "Courier New", monospace;
-  --font-pixel: "VT323", "Courier New", monospace;
-  --font-mono: "IBM Plex Mono", "Courier New", monospace;
-  --font-body: "IBM Plex Mono", "Courier New", monospace;
-
-  --text-xs: 0.75rem;
-  --text-sm: 0.9rem;
-  --text-md: 1.0625rem;
-  --text-lg: 1.45rem;
-  --text-xl: 2rem;
-  --text-display: clamp(1.9rem, 8.5vw, 3.4rem);
+  --text-xs: 0.6875rem;   /* 11px — receipts, tapback counts */
+  --text-sm: 0.8125rem;   /* 13px — timestamps, subtitles */
+  --text-md: 1.0625rem;   /* 17px — bubble body (iOS default) */
+  --text-lg: 1.25rem;
+  --text-xl: 1.6875rem;   /* large-title */
 
   --space-2xs: 0.25rem;
   --space-xs: 0.5rem;
@@ -65,22 +59,72 @@
   --space-md: 1rem;
   --space-lg: 1.5rem;
   --space-xl: 2rem;
-  --space-2xl: 3rem;
 
-  --radius-sm: 3px;
-  --radius-md: 6px;
-  --radius-card: 10px;
+  --radius-bubble: 20px;
+  --radius-tight: 5px;
+  --radius-card: 14px;
+  --radius-field: 19px;
 
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
-  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --dur-fast: 110ms;
+  --ease-out: cubic-bezier(0.25, 0.9, 0.3, 1);
+  --ease-spring: cubic-bezier(0.2, 0.9, 0.25, 1.2);
+  --dur-fast: 130ms;
   --dur-med: 240ms;
 
-  /* hard pixel-shadow (no blur) for the arcade-button look */
-  --pixel-shadow: 4px 4px 0 oklch(0% 0 0 / 0.55);
-  --pixel-shadow-sm: 3px 3px 0 oklch(0% 0 0 / 0.5);
-  --rule: 1px solid var(--color-edge);
-  --shadow-card: 0 0 0 2px var(--color-black), 0 0 34px oklch(74% 0.15 232 / 0.14),
-    0 22px 60px oklch(0% 0 0 / 0.6);
+  --shadow-nav: 0 0.5px 0 var(--hairline);
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.10), 0 8px 24px rgba(0,0,0,0.10);
+  --shadow-pop: 0 6px 20px rgba(0,0,0,0.18);
+
+  --dock-safe: env(safe-area-inset-bottom, 0px);
+  --top-safe: env(safe-area-inset-top, 0px);
+}
+
+/* dark mode — follows system, matched by data-theme override */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-app: #000000;
+    --bg-nav: rgba(22,22,23,0.78);
+    --bg-elev: #1c1c1e;
+    --bubble-in: #26252a;
+    --bubble-in-text: #ffffff;
+    --field-bg: #1c1c1e;
+    --field-border: #3a3a3c;
+    --hairline: rgba(84,84,88,0.36);
+    --hairline-strong: rgba(84,84,88,0.6);
+    --text: #ffffff;
+    --text-2: #ebebf5;
+    --text-muted: #8e8e93;
+    --text-faint: #636366;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg-app: #000000;
+  --bg-nav: rgba(22,22,23,0.78);
+  --bg-elev: #1c1c1e;
+  --bubble-in: #26252a;
+  --bubble-in-text: #ffffff;
+  --field-bg: #1c1c1e;
+  --field-border: #3a3a3c;
+  --hairline: rgba(84,84,88,0.36);
+  --hairline-strong: rgba(84,84,88,0.6);
+  --text: #ffffff;
+  --text-2: #ebebf5;
+  --text-muted: #8e8e93;
+  --text-faint: #636366;
+}
+
+:root[data-theme="light"] {
+  --bg-app: #ffffff;
+  --bg-nav: rgba(248,248,248,0.82);
+  --bg-elev: #ffffff;
+  --bubble-in: #e9e9eb;
+  --bubble-in-text: #000000;
+  --field-bg: #ffffff;
+  --field-border: #d1d1d6;
+  --hairline: rgba(60,60,67,0.16);
+  --hairline-strong: rgba(60,60,67,0.29);
+  --text: #000000;
+  --text-2: #3c3c43;
+  --text-muted: #8e8e93;
+  --text-faint: #aeaeb2;
 }
