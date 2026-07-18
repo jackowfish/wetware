@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="WETWARE" />
+  <meta name="theme-color" content="#05060a" />
+  <title>WETWARE</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%91%81%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/tokens.css" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <!-- the whole thing is one possessed CRT: scanlines, vignette, flicker, a rolling scan bar -->
+  <div class="crt" aria-hidden="true">
+    <div class="crt-vignette"></div>
+    <div class="crt-scanlines"></div>
+    <div class="crt-scanbar"></div>
+  </div>
+
+  <main id="app">
+    <!-- ═══════════ lobby ═══════════ -->
+    <section id="lobby" class="card">
+      <p class="est">▚ WETWARE CORP. · © 1992 · INSERT SOUL ▚</p>
+      <h1 class="title glitch" data-text="WETWARE">WETWARE</h1>
+      <p class="tagline" id="lobbyTagline">a line-up of machine answers. one of them still has a pulse. find it.</p>
+      <p class="join-banner hidden" id="joinBanner">
+        › patching into channel <code id="joinBannerCode"></code>
+      </p>
+
+      <label class="field">
+        <span>handle</span>
+        <input id="name" placeholder="player_1" maxlength="40" autocomplete="off" />
+      </label>
+
+      <div class="row">
+        <input id="joinCode" placeholder="CHANNEL CODE" maxlength="12" class="code-input" autocomplete="off" />
+        <button id="join" class="btn btn-secondary">jack in</button>
+      </div>
+      <div class="divider"><span>or</span></div>
+      <button id="create" class="btn btn-primary btn-big">▶ boot a new channel</button>
+
+      <p id="lobbyErr" class="err" role="alert"></p>
+    </section>
+
+    <!-- ═══════════ room ═══════════ -->
+    <section id="room" class="card hidden">
+      <header class="room-header">
+        <div class="room-code-box">
+          <span class="label">channel</span>
+          <code id="roomId">----</code>
+          <button id="copyLink" class="link">copy link</button>
+        </div>
+        <div class="right">
+          <span id="youAre" class="muted"></span>
+          <button id="renameBtn" class="link hidden">✎ handle</button>
+          <button id="settingsBtn" class="link hidden">⚙ setup</button>
+          <button id="leaveBtn" class="link">⏻ eject</button>
+        </div>
+      </header>
+
+      <div id="settingsModal" class="modal hidden" aria-hidden="true">
+        <div class="modal-backdrop" data-close></div>
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+          <div class="modal-head">
+            <h3 id="settingsTitle">setup</h3>
+            <button class="modal-close" data-close aria-label="close">✕</button>
+          </div>
+          <label class="field">
+            <span>machine answers per round</span>
+            <input id="setAiCount" type="number" min="2" max="6" value="4" inputmode="numeric" />
+          </label>
+          <p class="muted small">the imposter's answer is shuffled in among these, so <b id="setSlotHint">5</b> answers go up for the vote. changes apply at the next round.</p>
+          <p class="muted small" id="aiModeNote"></p>
+          <button class="btn btn-secondary modal-done" data-close>done</button>
+        </div>
+      </div>
+
+      <div class="phase-row">
+        <span id="phaseLabel" class="pill">gathering</span>
+        <span id="waitLabel" class="counts"></span>
+      </div>
+
+      <p id="connNote" class="conn-note hidden">◌ signal lost — reconnecting…</p>
+
+      <p id="roleNote" class="role-note hidden"></p>
+      <p id="stalledNote" class="stalled-note hidden">someone essential dropped out mid-round. the operator can boot a fresh one.</p>
+
+      <!-- ─── waiting for the round ─── -->
+      <div id="stageLobby" class="stage hidden">
+        <p class="stage-lead" id="lobbyHint"></p>
+        <div class="bot-row hidden" id="botRow">
+          <span class="bot-row-label">🧪 test players</span>
+          <input id="botCount" class="bot-count" type="number" min="1" max="12" value="4"
+                 inputmode="numeric" aria-label="how many test players to add" />
+          <button id="addBotsBtn" class="btn btn-secondary">add bots</button>
+        </div>
+        <div class="host-actions hidden" id="startRow">
+          <button id="startBtn" class="btn btn-accent btn-big">▶ start the round</button>
+        </div>
+      </div>
+
+      <!-- ─── the operator writes a prompt ─── -->
+      <div id="stagePrompt" class="stage hidden">
+        <h2 class="stage-head">the prompt</h2>
+        <p class="stage-lead" id="promptLead"></p>
+        <div id="promptCompose" class="compose hidden">
+          <textarea id="promptInput" maxlength="240" rows="3" placeholder="ask the machine anything…"></textarea>
+          <div class="compose-foot">
+            <span class="ch-count"><span id="promptCount">0</span>/240</span>
+            <button id="promptSend" class="btn btn-accent">▶ transmit to the machine</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── answers incoming ─── -->
+      <div id="stageAnswering" class="stage hidden">
+        <div class="prompt-quote" id="answeringPrompt"></div>
+        <h2 class="stage-head" id="answeringHead">answers incoming</h2>
+        <p class="stage-lead" id="answeringLead"></p>
+        <div id="answerCompose" class="compose hidden">
+          <textarea id="answerInput" maxlength="200" rows="3" placeholder="answer like a machine would… (max 3 sentences)"></textarea>
+          <div class="compose-foot">
+            <span class="ch-count"><span id="answerCount">0</span>/200</span>
+            <button id="answerSend" class="btn btn-accent">▶ plant your answer</button>
+          </div>
+        </div>
+        <div id="answerDone" class="done-note hidden">your answer is planted. now hide in the crowd.</div>
+        <div id="answeringSpinner" class="spinner-row hidden">
+          <span class="cursor-blink">▋</span> <span id="answeringSpinnerText">the machine is composing…</span>
+        </div>
+      </div>
+
+      <!-- ─── the vote ─── -->
+      <div id="stageVoting" class="stage hidden">
+        <div class="prompt-quote" id="votingPrompt"></div>
+        <h2 class="stage-head">spot the human</h2>
+        <p class="stage-lead" id="votingLead"></p>
+        <div id="slotList" class="slot-list"></div>
+        <p id="voteDone" class="done-note hidden">your vote is locked in.</p>
+        <div class="host-actions hidden" id="closeVoteRow">
+          <button id="closeVoteBtn" class="btn btn-accent btn-big">close the vote</button>
+        </div>
+      </div>
+
+      <!-- ─── the reveal ─── -->
+      <div id="stageReveal" class="stage hidden">
+        <div class="prompt-quote" id="revealPrompt"></div>
+        <h2 class="stage-head" id="revealHead">the reveal</h2>
+        <p class="stage-lead" id="revealLead"></p>
+        <div id="revealList" class="slot-list reveal-list"></div>
+        <div id="scoreboard" class="scoreboard"></div>
+        <div class="host-actions hidden" id="nextRow">
+          <button id="nextBtn" class="btn btn-accent btn-big">▶ next round</button>
+        </div>
+      </div>
+
+      <!-- who's on the channel -->
+      <ul id="members" class="members"></ul>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span class="credit">
+      Made with <span class="heart" aria-hidden="true">♥</span> by <a href="https://github.com/jackowfish" class="signature" rel="noopener noreferrer">Jack Decker</a>
+    </span>
+  </footer>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

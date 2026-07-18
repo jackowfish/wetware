@@ -1,0 +1,86 @@
+/* Hallmark · component: game-app · genre: retro-horror-arcade · theme: custom
+ * vibe: "a possessed 1992 arcade cabinet runs a Turing test as a party game"
+ * ref: Pony Island - curved CRT, heavy scanlines, red/blue de-calibration,
+ *      electric-blue corrupted menu, demonic red accents, cute-pony pink
+ * screen: oklch(13% 0.02 250) · primary: oklch(72% 0.15 232) electric cyan
+ * hellfire: oklch(60% 0.23 25) red · phosphor: oklch(82% 0.19 150) green
+ * pony: oklch(74% 0.20 350) pink (the human hides as the pony)
+ * fonts: Press Start 2P (wordmark) + VT323 (headings) + IBM Plex Mono (body)
+ * axes: dark / pixel-arcade / cool-with-hot-accents
+ * states: default · hover · focus · active · disabled · loading · error · success
+ * pre-emit critique: P5 H4 E4 S5 R4 V6
+ */
+
+:root {
+  /* the screen */
+  --color-black: oklch(9% 0.012 255);
+  --color-screen: oklch(13% 0.02 252);
+  --color-screen-2: oklch(17% 0.026 250);
+  --color-panel: oklch(20% 0.03 248);
+  --color-edge: oklch(38% 0.06 240);
+  --color-edge-2: oklch(50% 0.09 232);
+
+  /* electric blue - the corrupted OS */
+  --color-cyan: oklch(74% 0.15 232);
+  --color-cyan-bright: oklch(86% 0.16 220);
+  --color-cyan-dim: oklch(52% 0.11 235);
+
+  /* hellfire red - Lucifer, glitches, alerts */
+  --color-red: oklch(62% 0.23 25);
+  --color-red-bright: oklch(72% 0.24 28);
+
+  /* phosphor green - the machine / success */
+  --color-green: oklch(84% 0.2 150);
+  --color-green-dim: oklch(64% 0.15 152);
+
+  /* pony pink - the human hides here */
+  --color-pony: oklch(76% 0.2 350);
+  --color-pony-bright: oklch(84% 0.19 352);
+
+  --color-amber: oklch(82% 0.15 78);
+
+  /* text */
+  --color-text: oklch(91% 0.03 225);
+  --color-muted: oklch(64% 0.04 235);
+  --color-focus: oklch(86% 0.16 210);
+  --color-ok: var(--color-green);
+  --color-err: var(--color-red-bright);
+
+  /* type */
+  --font-arcade: "Press Start 2P", "Courier New", monospace;
+  --font-pixel: "VT323", "Courier New", monospace;
+  --font-mono: "IBM Plex Mono", "Courier New", monospace;
+  --font-body: "IBM Plex Mono", "Courier New", monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.9rem;
+  --text-md: 1.0625rem;
+  --text-lg: 1.45rem;
+  --text-xl: 2rem;
+  --text-display: clamp(1.9rem, 8.5vw, 3.4rem);
+
+  --space-2xs: 0.25rem;
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
+  --space-2xl: 3rem;
+
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-card: 10px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 110ms;
+  --dur-med: 240ms;
+
+  /* hard pixel-shadow (no blur) for the arcade-button look */
+  --pixel-shadow: 4px 4px 0 oklch(0% 0 0 / 0.55);
+  --pixel-shadow-sm: 3px 3px 0 oklch(0% 0 0 / 0.5);
+  --rule: 1px solid var(--color-edge);
+  --shadow-card: 0 0 0 2px var(--color-black), 0 0 34px oklch(74% 0.15 232 / 0.14),
+    0 22px 60px oklch(0% 0 0 / 0.6);
+}
