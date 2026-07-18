@@ -622,3 +622,41 @@ $("copyLink").addEventListener("click", async () => {
 });
 
 applyHashMode();
+
+// power-on self test: run the BIOS boot once per visit, skipped on plain
+// refreshes and for reduced motion - same pattern as raising a curtain.
+(function bootBios() {
+  const el = $("bios");
+  if (!el) return;
+  let seen = false;
+  try {
+    seen = !!sessionStorage.getItem("wetware:bios");
+    sessionStorage.setItem("wetware:bios", "1");
+  } catch {}
+  if (seen || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    el.remove();
+    return;
+  }
+  document.body.classList.add("booting");
+
+  // tick the memory count up while the log prints
+  const mem = document.getElementById("biosMem");
+  if (mem && window.requestAnimationFrame) {
+    const target = 640, dur = 900;
+    let start = null;
+    const tick = (now) => {
+      if (start === null) start = now;
+      const t = Math.min(1, (now - start) / dur);
+      mem.textContent = String(Math.floor(t * target)).padStart(6, "0");
+      if (t < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  requestAnimationFrame(() => el.classList.add("run"));
+  setTimeout(() => el.classList.add("off"), 2700);
+  setTimeout(() => {
+    el.remove();
+    document.body.classList.remove("booting");
+  }, 3300);
+})();

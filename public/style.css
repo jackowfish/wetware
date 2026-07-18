@@ -14,6 +14,50 @@ body {
   overflow-x: hidden;
 }
 
+/* ── BIOS power-on self test (the boot overlay) ── */
+body.booting { overflow: hidden; }
+.bios {
+  position: fixed; inset: 0; z-index: 200; background: var(--color-black);
+  display: grid; align-content: start; justify-items: center;
+  padding: clamp(1.5rem, 9vh, 5rem) clamp(1rem, 6vw, 3rem);
+  font-family: var(--font-mono); color: var(--color-green); overflow: hidden;
+}
+.bios::after { /* scanlines over the boot screen too */
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(to bottom, oklch(0% 0 0 / 0.4) 0 1px, transparent 1px 3px);
+}
+.bios-screen { position: relative; z-index: 1; width: 100%; max-width: 620px;
+  font-size: clamp(0.85rem, 3.4vw, 1.05rem); line-height: 1.85; }
+.bios-head { font-family: var(--font-pixel); font-size: clamp(1.4rem, 6vw, 2rem);
+  color: var(--color-cyan-bright); margin-bottom: 0.1em; position: relative; }
+.bios-sub { color: var(--color-red); margin-bottom: 1.4em; opacity: 0.9; }
+.bios-lines { list-style: none; }
+.bios-lines li { display: flex; align-items: baseline; gap: 0.5em; opacity: 0; }
+.bios-lines .lbl { white-space: nowrap; }
+.bios-lines .lead { flex: 1 1 auto; align-self: flex-end; transform: translateY(-0.25em);
+  border-bottom: 2px dotted var(--color-green-dim); opacity: 0.55; }
+.bios-lines b { color: var(--color-text); white-space: nowrap; }
+.bios-lines b.ok { color: var(--color-green); }
+.bios-lines b.warn { color: var(--color-red-bright); }
+.bios-lines li.boot { margin-top: 0.6em; color: var(--color-cyan-bright); }
+.bios-lines li.boot .lbl { letter-spacing: 0.08em; }
+.dots::after { content: "..."; }
+
+@media (prefers-reduced-motion: no-preference) {
+  #bios.run .bios-lines li { animation: bios-in 0.05s steps(1) forwards; }
+  #bios.run .bios-lines li:nth-child(1) { animation-delay: 0.15s; }
+  #bios.run .bios-lines li:nth-child(2) { animation-delay: 0.55s; }
+  #bios.run .bios-lines li:nth-child(3) { animation-delay: 0.95s; }
+  #bios.run .bios-lines li:nth-child(4) { animation-delay: 1.30s; }
+  #bios.run .bios-lines li:nth-child(5) { animation-delay: 1.70s; }
+  #bios.run .bios-lines li:nth-child(6) { animation-delay: 2.10s; }
+  #bios .dots::after { animation: bios-dots 0.9s steps(1) infinite; }
+  #bios.off { animation: bios-off 0.55s var(--ease-in) forwards; }
+}
+@keyframes bios-in { to { opacity: 1; } }
+@keyframes bios-dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+@keyframes bios-off { to { opacity: 0; transform: scale(1.03); filter: brightness(3.5) saturate(0.3); } }
+
 /* ── the CRT: scanlines, vignette, flicker, a rolling scan bar ── */
 .crt { position: fixed; inset: 0; z-index: 90; pointer-events: none; }
 .crt-scanlines {

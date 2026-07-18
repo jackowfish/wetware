@@ -16,6 +16,22 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
+  <!-- power-on self test - plays once per visit, like a possessed BIOS booting -->
+  <div id="bios" class="bios" aria-hidden="true">
+    <div class="bios-screen">
+      <p class="bios-head glitch" data-text="WETWARE BIOS v6.66">WETWARE BIOS v6.66</p>
+      <p class="bios-sub">(C) 1992 WETWARE CORP. — all souls reserved</p>
+      <ul class="bios-lines">
+        <li><span class="lbl">Detecting wetware</span><span class="lead"></span><b>1 UNIT</b></li>
+        <li><span class="lbl">Memory test</span><span class="lead"></span><b class="ok"><span id="biosMem">000000</span>K OK</b></li>
+        <li><span class="lbl">Initializing neural bus</span><span class="lead"></span><b class="ok">OK</b></li>
+        <li><span class="lbl">Mounting SOUL.SYS</span><span class="lead"></span><b class="ok">OK</b></li>
+        <li><span class="lbl">Scanning for imposters</span><span class="lead"></span><b class="warn">1 FOUND</b></li>
+        <li class="boot"><span class="lbl">BOOTING WETWARE</span><span class="dots"></span></li>
+      </ul>
+    </div>
+  </div>
+
   <!-- the whole thing is one possessed CRT: scanlines, vignette, flicker, a rolling scan bar -->
   <div class="crt" aria-hidden="true">
     <div class="crt-vignette"></div>
