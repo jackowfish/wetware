@@ -1,11 +1,13 @@
-FROM node:20-alpine
+FROM node:24-alpine
 
 RUN apk add --no-cache redis tini
 
 WORKDIR /app
 
 COPY package.json ./
-RUN npm install --omit=dev
+# npm is only needed to install. Removing it drops its bundled packages and their CVEs.
+RUN npm install --omit=dev \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 COPY server.js ./
 COPY public ./public
